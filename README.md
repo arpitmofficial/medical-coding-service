@@ -21,7 +21,9 @@ Add `.env` file with:
 
 
 JINA_API_KEY=
+
 QDRANT_URL=
+
 QDRANT_API_KEY=
 
 
