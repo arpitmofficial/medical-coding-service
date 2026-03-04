@@ -1,5 +1,3 @@
-# medical-coding-service
-
 # ICD Retrieval System
 
 This project retrieves ICD codes using vector search.
