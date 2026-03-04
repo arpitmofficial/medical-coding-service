@@ -1,6 +1,22 @@
-git clone repo
-pip install -r requirements.txt
 # medical-coding-service
+
+# ICD Retrieval System
+
+This project retrieves ICD codes using vector search.
+
+## Setup
+
+Clone repo:
+
+
+git clone repo
+cd DASS_Project
+
+
+Install dependencies:
+
+
+pip install -r requirements.txt
 
 
 Add `.env` file with:
@@ -20,4 +36,3 @@ python scripts/query_test.py
 ## Architecture
 
 Query → Jina Embedding → Qdrant Cloud Vector Search → Results
->>>>>>> master
