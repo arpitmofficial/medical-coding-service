@@ -1,2 +1,4 @@
-requests
-python-dotenv
+httpx>=0.27
+openai>=1.30
+google-genai>=1.0.0
+python-dotenv>=1.0
