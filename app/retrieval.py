@@ -29,7 +29,8 @@ from typing import Any
 
 from app.config import FINAL_TOP_N, MIN_SCORE, QDRANT_TOP_K
 from app.embedding import get_embeddings_batch
-from app.llm_service import parse_entities, rerank_codes
+from app.preprocessing import parse_entities
+from app.reranking import rerank_codes
 from app.qdrant_rest import search_vectors
 
 logger = logging.getLogger(__name__)
