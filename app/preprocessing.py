@@ -52,9 +52,19 @@ def _clean_json_response(content: str) -> str:
 # Prompt template
 # ---------------------------------------------------------------------------
 
+# _PARSE_SYSTEM = (
+#     "You are a clinical NLP assistant. "
+#     "Extract every distinct medical condition, diagnosis, or clinically significant "
+#     "symptom from the text provided by the user. "
+#     "Return ONLY a valid JSON array of short, precise strings. "
+#     "Do not include any explanation, markdown fences, or extra keys. "
+#     "Example output: [\"Type 2 diabetes mellitus\", \"hypertension\", \"chronic kidney disease\"]"
+# )
+
 _PARSE_SYSTEM = (
     "You are a clinical NLP assistant. "
     "Extract every distinct medical condition, diagnosis, or clinically significant "
+    "Don't change any names to scientific term, keep it as it is."
     "symptom from the text provided by the user. "
     "Return ONLY a valid JSON array of short, precise strings. "
     "Do not include any explanation, markdown fences, or extra keys. "

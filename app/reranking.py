@@ -111,7 +111,7 @@ async def rerank_codes(
             }
             for c in candidates
         ],
-        indent=2,
+        indent=2,   
     )
 
     user_message = (
