@@ -9,11 +9,14 @@ scores and explanations.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from app.config import LLM_API_KEY, LLM_MODEL, FINAL_TOP_N
+from app.execution_analysis import tracker
 
 logger = logging.getLogger(__name__)
 
@@ -122,26 +125,78 @@ async def rerank_codes(
         f"Return the top {FINAL_TOP_N} most appropriate codes."
     )
 
-    if _is_gemini:
-        prompt = f"{_RERANK_SYSTEM}\n\n{user_message}"
-        response = await _gemini_client.aio.models.generate_content(
-            model=LLM_MODEL,
-            contents=prompt,
-            config={"temperature": 0},
-        )
-        content = response.text.strip()
-    else:
-        response = await _client.chat.completions.create(
-            model=LLM_MODEL,
-            temperature=0,
-            messages=[
-                {"role": "system", "content": _RERANK_SYSTEM},
-                {"role": "user", "content": user_message},
-            ],
-        )
-        content = response.choices[0].message.content.strip()
+    input_tokens = output_tokens = total_tokens = None
+    error_msg: str | None = None
+    content: str | None = None
+    t0 = time.perf_counter()
 
-    logger.debug("rerank_codes | raw LLM response: %s", content)
+    try:
+        if _is_gemini:
+            prompt = f"{_RERANK_SYSTEM}\n\n{user_message}"
+            response = await asyncio.wait_for(
+                _gemini_client.aio.models.generate_content(
+                    model=LLM_MODEL,
+                    contents=prompt,
+                    config={"temperature": 0},
+                ),
+                timeout=20.0,
+            )
+            content = response.text.strip()
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                um = response.usage_metadata
+                input_tokens  = getattr(um, "prompt_token_count", None)
+                output_tokens = getattr(um, "candidates_token_count", None)
+                total_tokens  = getattr(um, "total_token_count", None)
+        else:
+            response = await asyncio.wait_for(
+                _client.chat.completions.create(
+                    model=LLM_MODEL,
+                    temperature=0,
+                    messages=[
+                        {"role": "system", "content": _RERANK_SYSTEM},
+                        {"role": "user", "content": user_message},
+                    ],
+                ),
+                timeout=20.0,
+            )
+            content = response.choices[0].message.content.strip()
+            if response.usage:
+                input_tokens  = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
+                total_tokens  = response.usage.total_tokens
+
+    except asyncio.TimeoutError:
+        error_msg = "LLM API timeout (> 20 s)"
+        logger.error("rerank_codes | %s; falling back to score-based ranking", error_msg)
+
+    except Exception as e:
+        err_type = type(e).__name__
+        status_code = getattr(e, "status_code", None) or getattr(e, "code", None)
+        if status_code == 429 or "RateLimit" in err_type or "ResourceExhausted" in err_type or "quota" in str(e).lower():
+            error_msg = f"LLM rate-limited / high traffic ({err_type})"
+        else:
+            error_msg = f"{err_type}: {e}"
+        logger.error("rerank_codes | LLM error — %s; falling back to score-based ranking", error_msg)
+
+    api_elapsed = time.perf_counter() - t0
+    tracker.record_api_call(
+        "reranking.py", "LLM (rerank_codes)", api_elapsed,
+        input_tokens, output_tokens, total_tokens,
+        error=error_msg,
+    )
+
+    # If the API call failed entirely, fall back to score-based ranking
+    if content is None:
+        return [
+            {
+                "code": c["code"],
+                "description": c["description"],
+                "confidence": round(c["score"] * 100),
+                "explanation": "LLM re-ranking unavailable; ranked by vector similarity.",
+            }
+            for c in sorted(candidates, key=lambda x: x["score"], reverse=True)[:FINAL_TOP_N]
+        ]
+
     
     # Clean markdown fences from response
     content = _clean_json_response(content)

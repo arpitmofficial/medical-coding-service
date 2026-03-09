@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from app.config import FINAL_TOP_N, MIN_SCORE, QDRANT_TOP_K
 from app.embedding import get_embeddings_batch
+from app.execution_analysis import tracker
 from app.preprocessing import parse_entities
 from app.reranking import rerank_codes
 from app.qdrant_rest import search_vectors
@@ -70,7 +72,9 @@ async def retrieve_icd_candidates(
     # Stage 0 — parse clinical entities
     # ------------------------------------------------------------------
     logger.info("Pipeline start | raw_text length=%d", len(raw_text))
+    tracker.start_module("preprocessing.py")
     entities: list[str] = await parse_entities(raw_text)
+    tracker.end_module("preprocessing.py")
 
     if not entities:
         logger.warning("No entities extracted; aborting pipeline.")
@@ -82,15 +86,29 @@ async def retrieve_icd_candidates(
 
     # Embed in a single batched call (one round-trip to Jina)
     logger.info("Embedding %d entities …", len(entities))
-    vectors: list[list[float]] = await get_embeddings_batch(entities)
+    tracker.start_module("embedding.py")
+    try:
+        vectors: list[list[float]] = await get_embeddings_batch(entities)
+    except RuntimeError as exc:
+        tracker.end_module("embedding.py")
+        logger.error("Embedding stage failed: %s", exc)
+        raise
+    tracker.end_module("embedding.py")
 
     # Fan out Qdrant searches concurrently (one coroutine per entity)
     logger.info("Searching Qdrant (top_k=%d) for each entity …", qdrant_top_k)
-    qdrant_tasks = [
-        search_vectors(vec, limit=qdrant_top_k)
-        for vec in vectors
-    ]
-    per_entity_results: list[list[dict[str, Any]]] = await asyncio.gather(*qdrant_tasks)
+    tracker.start_module("qdrant_rest.py")
+    try:
+        qdrant_tasks = [
+            search_vectors(vec, limit=qdrant_top_k)
+            for vec in vectors
+        ]
+        per_entity_results: list[list[dict[str, Any]]] = await asyncio.gather(*qdrant_tasks)
+    except RuntimeError as exc:
+        tracker.end_module("qdrant_rest.py")
+        logger.error("Qdrant search stage failed: %s", exc)
+        raise
+    tracker.end_module("qdrant_rest.py")
 
     # Merge & deduplicate: keep highest score per ICD code
     best_by_code: dict[str, dict[str, Any]] = {}
@@ -123,7 +141,9 @@ async def retrieve_icd_candidates(
     # Stage 2 — LLM re-ranking
     # ------------------------------------------------------------------
     logger.info("LLM re-ranking %d candidates → top %d …", len(candidates), final_top_n)
+    tracker.start_module("reranking.py")
     reranked = await rerank_codes(raw_text, candidates)
+    tracker.end_module("reranking.py")
 
     logger.info("Pipeline complete | returning %d results", len(reranked))
     return reranked
