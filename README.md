@@ -1,87 +1,483 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/4T_GxXnv)
-[![Open in Visual Studio Code](https://classroom.github.com/assets/open-in-vscode-2e0aaae1b6195c2367325f4f02e2d04e9abb55f0b24a779b69b11b9e10269abc.svg)](https://classroom.github.com/online_ide?assignment_repo_id=22434756&assignment_repo_type=AssignmentRepo)
-# DASS Spring 2026 Template
+# Medical Coding Service
 
-This template includes an Excel-based status tracker and an automated weekly snapshot workflow for submissions.
+A FastAPI-based medical coding system that retrieves standardized medical codes (ICD-10, CPT, LOINC) from clinical notes using hybrid search with LLM-powered entity extraction and re-ranking.
 
-## Quick Start
-1. Create/update `docs/StatusTracker.xls` in Microsoft Excel (binary file; do not replace with CSV).
-2. Use these columns in row 1:
-   - Week
-   - Activity Name
-   - Type
-   - Responsible
-   - Est Hours
-   - Actual Hours
-   - Status
-3. Add weekly header rows (Week 1, Week 2, etc.) so students fill in below each header.
-4. Save the file in `docs/` and commit it.
+## Table of Contents
 
-## Repository Layout
-- `.github/workflows/weekly-snapshot.yml` auto-creates weekly release snapshots.
-- `.github/workflows/snapshot-integrity.yml` detects tampering of past weekly snapshots.
-- `docs/StatusTracker.xls` Excel tracker (update weekly).
-- `docs/ProjectPlan.md` project plan template.
-- `docs/release-labels.txt` optional: add weekly labels/categories for TAs.
-- `docs/admin-setup.md` TA-only: required repo settings (tag protection).
-- `src/` project source code.
+- [Overview](#overview)
+- [System Requirements](#system-requirements)
+- [Environment Variables](#environment-variables)
+- [Installation](#installation)
+- [Running the API](#running-the-api)
+- [API Documentation & Testing](#api-documentation--testing)
+- [API Endpoints](#api-endpoints)
+- [Example Usage](#example-usage)
 
-## Notes
-- `.gitattributes` marks `.xls/.xlsx` as binary to avoid noisy diffs.
-- `.gitignore` ignores Office temp files like `~$StatusTracker.xls`.
+---
 
-## Weekly submission integrity (anti-cheat)
+## Overview
 
-### What is enforced automatically
-Every Friday, GitHub Actions will:
+The Medical Coding Service is a shared gateway that:
+- Sits above individual model directories (model-icd-10, model-cpt, model-loinc, etc.)
+- Provides a single HTTP interface for doctors to submit clinical diagnoses
+- Returns standardized medical codes with confidence scores and clinical explanations
 
-1. **Require weekly activity**: `docs/StatusTracker.xls` and `docs/ProjectPlan.md` must have at least one commit in the current week window.
-2. **Create an immutable anchor**: an **annotated git tag** `submission-week-N` is created pointing to the repository state for that week.
-3. **Create a release** from that tag. The release body is exactly the annotated tag message.
-4. **Include a hash manifest**: the tag/release body includes sha256 hashes of every file under `src/` and `docs/`.
+**Current Features:**
+- ✅ ICD-10 medical code retrieval
+- 🔄 CPT and LOINC endpoints (future implementation)
 
-If any check fails, the weekly release/tag is **not created** (the workflow fails).
+---
 
-### How teams add "labels/categories" without editing the Release
-Edit `docs/release-labels.txt`. Its contents are included in the tag annotation + release body.
+## System Requirements
 
-### Allowing teams to add extra git tags
-Teams may create additional git tags (e.g., `milestone-1`) on their own commits.
-However, to prevent rewriting submission history, course admins should enable **Tag protection** for:
+- **Python 3.9+**
+- **pip** or **conda** (Python package manager)
+- API keys for external services (see [Environment Variables](#environment-variables))
+- Qdrant vector database instance (running or accessible via URL)
 
-- `submission-week-*` (no deletions / force-updates)
+---
 
-### Tamper detection
-Another workflow runs periodically to verify that for every `submission-week-*` tag:
+## Environment Variables
 
-- the GitHub Release body matches the annotated tag message (SHA256 check)
+Create a `.env` file in the `src/` directory with the following variables:
 
-If a mismatch is found, it fails and opens a GitHub Issue as an audit trail.
+### **Required Variables**
 
-> Note: GitHub cannot fully prevent cheating if students have full write access, but protected submission tags + hash manifests make manipulation difficult and highly detectable.
+```bash
+# API Authentication
+API_KEY=your_secret_api_key_here
 
-## Process Integrity Safeguards (TA Use)
-Use these interventions to discourage fabrication and enforce process adherence.
+# Qdrant Vector Database
+QDRANT_URL=http://localhost:6333          # Qdrant instance URL
+QDRANT_API_KEY=your_qdrant_api_key
 
-### Tier 1: Soft Intervention (Mentorship)
-- Observer Effect Warning: reference a specific tracker data point to signal review.
-  Script: "I noticed in your tracker that Task A took exactly 4.0 hours and Task B took exactly 4.0 hours. Real development usually has more variation (e.g., 3.5 or 4.25). Please ensure you are logging actual clock times, not rough estimates."
-- Git History Trap: if commits show batching, ask for proof tied to the stated day.
-  Script: "Your tracker says you finished the API setup on Tuesday. Can you show me the git commit hash corresponding to that specific task on Tuesday?"
+# Embeddings API
+JINA_API_KEY=your_jina_api_key
 
-### Tier 2: Hard Intervention (Grading Penalty)
-- Variance Check: if variance is suspiciously low (e.g., every entry is 2 hours), deduct 10-20% of the weekly process grade for Data Quality.
-  Justification: "Data Quality. The logs provided lack statistical realism and appear smoothed. This is poor project management practice."
-- Friday Night Deduction: if the tracker was only touched right before the deadline, deduct 50% of the process grade for Lack of Continuous Integration.
-  Justification: "Agile requires iterative tracking. Batch-updating at the deadline defeats the purpose of the tracker."
+# LLM Configuration (OpenAI-compatible)
+LLM_API_KEY=your_llm_api_key              # e.g., OpenAI or compatible service
+LLM_MODEL=gpt-4o-mini                     # LLM model name (default: gpt-4o-mini)
+```
 
-### Tier 3: Formal Integrity Violation
-- Forensic Audit: if the tracker claims work with no code changes in `src/`, conduct a Viva audit.
-  Action: open GitHub Insights (Network graph) live, overlay tracker claims, and ask for the corresponding code.
-  Outcome: if no code exists for claimed work, report Academic Dishonesty to the course professor.
+### **Optional Variables** (Pipeline Tuning)
 
-## Policy Text for Course Handout
-- Integrity of Project Artifacts: The `StatusTracker.xls` is a living document, not a homework assignment. It must reflect the actual state of development.
-- Batch Updates: Updating logs retroactively for multiple days/weeks is considered a failure of process adherence.
-- Fabrication: Logging hours for work not supported by version control evidence (git commits) constitutes academic dishonesty and will result in a grade of zero for that module.
-- Verification: Teaching staff reserve the right to audit tracker data against commit timestamps and variance analysis.
+```bash
+# Pipeline Configuration
+QDRANT_TOP_K=50                           # Candidates per entity (default: 50)
+FINAL_TOP_N=5                             # Codes returned to caller (default: 5)
+MIN_SCORE=0.0                             # Score cutoff threshold (default: 0.0, no filter)
+```
+
+### **Example `.env` File**
+
+```bash
+cat > src/.env << 'EOF'
+API_KEY=medical-api-key-12345
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=qdrant-key-xyz
+JINA_API_KEY=jina-embedding-key
+LLM_API_KEY=sk-your-openai-key
+LLM_MODEL=gpt-4o-mini
+QDRANT_TOP_K=50
+FINAL_TOP_N=5
+MIN_SCORE=0.0
+EOF
+```
+
+---
+
+## Installation
+
+### 1. **Clone or Navigate to Project**
+
+```bash
+cd /path/to/medical-coding-service
+```
+
+### 2. **Create a Virtual Environment** (Recommended)
+
+```bash
+# Using venv
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Or using conda
+conda create -n medical-coding python=3.9
+conda activate medical-coding
+```
+
+### 3. **Install Dependencies**
+
+```bash
+cd src/
+
+# Install main API dependencies
+pip install -r requirements.txt
+
+# Install model-specific dependencies (ICD-10)
+pip install -r model-icd-10/requirements.txt
+```
+
+### 4. **Verify Installation**
+
+```bash
+python -c "import fastapi; import uvicorn; print('✅ All dependencies installed')"
+```
+
+---
+
+## Running the API
+
+### **Start the API Server**
+
+From the `src/` directory:
+
+```bash
+cd src/
+uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Command Breakdown:**
+- `uvicorn api:app` — Run the FastAPI app from `api.py`
+- `--host 0.0.0.0` — Accept connections from any IP
+- `--port 8000` — Listen on port 8000 (change as needed)
+- `--reload` — Auto-reload on code changes (use only in development)
+
+### **Server Output**
+
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Application startup complete
+INFO:     Registering models …
+INFO:     ICD-10 model registered
+```
+
+The API is now running and ready to receive requests!
+
+### **Optional: Custom Port**
+
+```bash
+uvicorn api:app --host 0.0.0.0 --port 5000
+```
+
+Access API at: `http://localhost:5000`
+
+---
+
+## API Documentation & Testing
+
+### **Interactive API Documentation (Swagger UI)**
+
+Once the server is running, visit:
+
+```
+http://localhost:8000/docs
+```
+
+This provides:
+- ✅ Interactive API exploration
+- ✅ Live request/response testing
+- ✅ Automatic schema validation
+- ✅ Beautiful web interface
+
+### **Alternative: ReDoc**
+
+```
+http://localhost:8000/redoc
+```
+
+Provides detailed API documentation in a different format.
+
+---
+
+## API Endpoints
+
+### **1. Health Check**
+
+**Endpoint:** `GET /health`
+
+**Description:** Check API status and available models
+
+**No Authentication Required**
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "models": ["icd10"]
+}
+```
+
+**Example using cURL:**
+```bash
+curl http://localhost:8000/health
+```
+
+---
+
+### **2. Predict (All Models)**
+
+**Endpoint:** `POST /predict`
+
+**Description:** Run all registered models on clinical notes
+
+**Authentication Required:** `Authorization: Bearer <API_KEY>`
+
+**Request Body:**
+```json
+{
+  "clinical_notes": "Patient presents with acute chest pain radiating to left arm"
+}
+```
+
+**Response:**
+```json
+{
+  "clinical_notes": "Patient presents with acute chest pain radiating to left arm",
+  "results": [
+    {
+      "model": "icd10",
+      "codes": [
+        {
+          "code": "I21.9",
+          "description": "Acute myocardial infarction, unspecified",
+          "confidence": 95,
+          "explanation": "Acute chest pain with radiation pattern consistent with MI"
+        }
+      ],
+      "error": null,
+      "elapsed_seconds": 2.345
+    }
+  ],
+  "total_elapsed_seconds": 2.345
+}
+```
+
+---
+
+### **3. Predict ICD-10 (Specific Model)**
+
+**Endpoint:** `POST /predict/icd10`
+
+**Description:** Run only the ICD-10 model pipeline
+
+**Authentication Required:** `Authorization: Bearer <API_KEY>`
+
+**Request Body:**
+```json
+{
+  "clinical_notes": "Patient presents with acute chest pain radiating to left arm"
+}
+```
+
+**Response Format:** Same as `/predict` endpoint
+
+---
+
+## Example Usage
+
+### **Using FastAPI Swagger UI (Browser)**
+
+1. **Start the server:**
+   ```bash
+   cd src/
+   uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+   ```
+
+2. **Open browser:**
+   ```
+   http://localhost:8000/docs
+   ```
+
+3. **Test endpoint:**
+   - Click on `POST /predict`
+   - Click **Try it out**
+   - Add your API key in the Authorization field
+   - Enter clinical notes in the request body
+   - Click **Execute**
+
+### **Using cURL (Command Line)**
+
+```bash
+# Test health endpoint (no auth needed)
+curl http://localhost:8000/health
+
+# Run prediction with cURL
+curl -X POST http://localhost:8000/predict/icd10 \
+  -H "Authorization: Bearer your_secret_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clinical_notes": "Patient presents with acute chest pain radiating to left arm"
+  }'
+```
+
+### **Using Python Requests Library**
+
+```python
+import requests
+import json
+
+# API Configuration
+BASE_URL = "http://localhost:8000"
+API_KEY = "your_secret_api_key_here"
+
+# Headers with authentication
+headers = {
+    "Authorization": f"Bearer {API_KEY}",
+    "Content-Type": "application/json"
+}
+
+# Clinical notes to analyze
+payload = {
+    "clinical_notes": "Patient presents with acute chest pain radiating to left arm"
+}
+
+# Make request
+response = requests.post(f"{BASE_URL}/predict/icd10", json=payload, headers=headers)
+
+# Print results
+print(json.dumps(response.json(), indent=2))
+```
+
+### **Using JavaScript/Fetch**
+
+```javascript
+const BASE_URL = "http://localhost:8000";
+const API_KEY = "your_secret_api_key_here";
+
+const payload = {
+  clinical_notes: "Patient presents with acute chest pain radiating to left arm"
+};
+
+const headers = {
+  "Authorization": `Bearer ${API_KEY}`,
+  "Content-Type": "application/json"
+};
+
+fetch(`${BASE_URL}/predict/icd10`, {
+  method: "POST",
+  headers: headers,
+  body: JSON.stringify(payload)
+})
+  .then(response => response.json())
+  .then(data => console.log(JSON.stringify(data, null, 2)))
+  .catch(error => console.error("Error:", error));
+```
+
+---
+
+## Project Structure
+
+```
+medical-coding-service/
+├── README.md                          # This file
+├── src/
+│   ├── api.py                        # Main FastAPI application
+│   ├── requirements.txt               # API dependencies
+│   ├── .env                          # Environment variables (create this)
+│   ├── model-icd-10/                 # ICD-10 model pipeline
+│   │   ├── README.md                 # ICD-10 documentation
+│   │   ├── requirements.txt          # Model dependencies
+│   │   ├── app/
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py             # Configuration & environment setup
+│   │   │   ├── adaptive_retrieval.py # Main pipeline entry point
+│   │   │   ├── embedding.py          # Vector embeddings
+│   │   │   ├── retrieval.py          # Qdrant retrieval
+│   │   │   ├── reranking.py          # LLM re-ranking
+│   │   │   ├── preprocessing.py      # Text preprocessing
+│   │   │   └── ...
+│   │   ├── scripts/
+│   │   │   ├── ingest.py            # Data ingestion
+│   │   │   └── query_test.py        # Query testing
+│   │   └── logs/                     # Model logs
+│   └── scripts/
+│       └── logs/
+```
+
+---
+
+## Troubleshooting
+
+### **Issue: "API_KEY not set" error**
+
+**Solution:**
+- Ensure `.env` file exists in `src/` directory
+- Verify `API_KEY` variable is set: `cat src/.env | grep API_KEY`
+- Restart the uvicorn server
+
+### **Issue: "Invalid API key" (403 Forbidden)**
+
+**Solution:**
+- Ensure the Bearer token in `Authorization` header matches the `API_KEY` in `.env`
+- Check header format: `Authorization: Bearer <your_key>`
+
+### **Issue: Qdrant connection error**
+
+**Solution:**
+- Verify Qdrant is running: `curl http://localhost:6333/health`
+- Check `QDRANT_URL` in `.env` file
+- Verify `QDRANT_API_KEY` is correct
+
+### **Issue: Jina API authentication failed**
+
+**Solution:**
+- Verify `JINA_API_KEY` is correct and active
+- Check network connectivity to Jina embedding service
+
+### **Issue: LLM API errors**
+
+**Solution:**
+- Verify `LLM_API_KEY` is valid and has sufficient quota
+- Check `LLM_MODEL` name is supported by your LLM provider
+- Monitor logs in `src/logs/medical_coding.log`
+
+### **View Logs**
+
+```bash
+# Real-time log monitoring from src/ directory
+tail -f logs/medical_coding.log
+
+# Or view older logs
+cat logs/medical_coding.log
+```
+
+---
+
+## Development Notes
+
+### **Reload on Code Changes**
+
+The `--reload` flag automatically restarts the server when you modify `api.py` or related files.
+
+```bash
+uvicorn api:app --reload
+```
+
+### **Production Deployment**
+
+For production, use a production ASGI server:
+
+```bash
+# Using Gunicorn + Uvicorn workers
+gunicorn api:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+
+# Or using just uvicorn without reload
+uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+---
+
+## License
+
+[Specify your license here]
+
+---
+
+## Support
+
+For issues or questions:
+1. Check logs: `tail -f src/logs/medical_coding.log`
+2. Review API documentation: `http://localhost:8000/docs`
+3. Verify environment configuration: Check `.env` file setup
+
