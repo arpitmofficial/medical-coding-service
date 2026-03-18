@@ -14,7 +14,7 @@ import json
 import logging
 import time
 
-from app.config import LLM_API_KEY, LLM_MODEL
+from app.config import LLM_API_KEY, LLM_MODEL, console_logger
 from app.execution_analysis import tracker
 
 logger = logging.getLogger(__name__)
@@ -56,12 +56,22 @@ def _clean_json_response(content: str) -> str:
 # ---------------------------------------------------------------------------
 
 _PARSE_SYSTEM = (
-    "You are a clinical NLP assistant. "
-    "Extract every distinct medical condition, diagnosis, or clinically significant "
-    "symptom from the text provided by the user. "
-    "Return ONLY a valid JSON array of short, precise strings. "
-    "Do not include any explanation, markdown fences, or extra keys. "
-    "Example output: [\"Type 2 diabetes mellitus\", \"hypertension\", \"chronic kidney disease\"]"
+    "You are a clinical NLP assistant specializing in ICD-10-CM coding preparation. "
+    "Extract every distinct medical condition, diagnosis, symptom, AND external cause of injury from the text. "
+    "IMPORTANT RULES:\n"
+    "1. Retain Context & Laterality: NEVER isolate a condition from its anatomical site or laterality (left/right). "
+    "Extract 'laceration of right forearm', not just 'laceration'.\n"
+    "2. Capture External Causes: Always extract the specific event or mechanism that caused an injury "
+    "(e.g., 'bitten by a stray dog', 'fall from a ladder', 'motor vehicle accident').\n"
+    "3. Do Not Fragment: Keep related descriptive concepts together in a single string to maintain context.\n"
+    "4. Convert colloquial/layman terms to standard medical terminology:\n"
+    "   - 'heart attack' → 'acute myocardial infarction'\n"
+    "   - 'stroke' → 'cerebrovascular accident'\n"
+    "   - 'high blood pressure' → 'hypertension'\n"
+    "   - 'sugar' or 'sugar disease' → 'diabetes mellitus'\n"
+    "   - 'broken bone' → 'fracture'\n"
+    "Return ONLY a valid JSON array of descriptive medical strings. Do not include markdown fences or extra text.\n"
+    "Example output: [\"laceration of right forearm\", \"bitten by a stray dog\", \"acute myocardial infarction\"]"
 )
 
 # _PARSE_SYSTEM = (
@@ -183,5 +193,9 @@ async def parse_entities(raw_text: str) -> list[str]:
             seen.add(key)
             unique.append(e.strip())
 
-    logger.info("parse_entities | extracted %d entities: %s", len(unique), unique)
+    logger.debug("parse_entities | extracted %d entities: %s", len(unique), unique)
+    
+    # Show extracted entities in console
+    console_logger.info(f"🧠 LLM Entity Extraction: {unique}")
+    
     return unique

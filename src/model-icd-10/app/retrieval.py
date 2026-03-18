@@ -81,14 +81,20 @@ async def retrieve_icd_candidates(
         return []
 
     # ------------------------------------------------------------------
-    # Stage 1 — embed all entities concurrently, then search Qdrant
+    # Stage 1 — embed all entities + original query, then search Qdrant
     # ------------------------------------------------------------------
 
+    # Include the original raw_text as an additional search query
+    # This captures combined semantic meaning that individual entities might miss
+    # e.g., "heart attack with chest pain" might match "myocardial infarction with chest pain"
+    search_queries = [raw_text.strip()] + entities
+    logger.info("Search queries: original query + %d entities = %d total", len(entities), len(search_queries))
+
     # Embed in a single batched call (one round-trip to Jina)
-    logger.info("Embedding %d entities …", len(entities))
+    logger.info("Embedding %d search queries …", len(search_queries))
     tracker.start_module("embedding.py")
     try:
-        vectors: list[list[float]] = await get_embeddings_batch(entities)
+        vectors: list[list[float]] = await get_embeddings_batch(search_queries)
     except RuntimeError as exc:
         tracker.end_module("embedding.py")
         logger.error("Embedding stage failed: %s", exc)

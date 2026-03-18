@@ -106,6 +106,13 @@ class MetricsTracker:
                     out_t  = str(call.output_tokens) if call.output_tokens is not None else "-"
                     tot_t  = str(call.total_tokens)  if call.total_tokens  is not None else "-"
                     print(f"  {call.api_name:<30} {call.elapsed_sec:>10.4f} {status:<12} {in_t:>8} {out_t:>8} {tot_t:>8}")
+                    # Show thinking/external tokens if total > input + output
+                    if (call.input_tokens is not None and call.output_tokens is not None
+                            and call.total_tokens is not None):
+                        io_sum = call.input_tokens + call.output_tokens
+                        if call.total_tokens > io_sum:
+                            thinking = call.total_tokens - io_sum
+                            print(f"  {'':30} {'':>10} {'':12} (incl. {thinking} thinking tokens)")
                     if call.error:
                         print(f"  {'':30}   !! {call.error}")
 
@@ -130,6 +137,10 @@ class MetricsTracker:
         print(f"  {'Total LLM input tokens:':<40} {grand_input_tokens}")
         print(f"  {'Total LLM output tokens:':<40} {grand_output_tokens}")
         print(f"  {'Total LLM tokens:':<40} {grand_total_tokens}")
+        io_sum = grand_input_tokens + grand_output_tokens
+        if grand_total_tokens > io_sum:
+            thinking = grand_total_tokens - io_sum
+            print(f"  {'  (incl. thinking tokens):':<40} {thinking}")
         print(SEP + "\n")
 
 

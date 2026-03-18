@@ -15,10 +15,13 @@ import logging
 import time
 from typing import Any
 
-from app.config import LLM_API_KEY, LLM_MODEL, FINAL_TOP_N
+from app.config import LLM_API_KEY, LLM_MODEL, FINAL_TOP_N, console_logger
 from app.execution_analysis import tracker
 
 logger = logging.getLogger(__name__)
+
+# Store original user input for reranking context
+_original_user_input: str = ""
 
 # Detect which API to use based on the model name
 _is_gemini = LLM_MODEL.startswith("gemini")
@@ -31,8 +34,85 @@ else:
     _client = AsyncOpenAI(api_key=LLM_API_KEY)
 
 # ---------------------------------------------------------------------------
+# Confidence Score Weights (tune these based on your evaluation data)
+# ---------------------------------------------------------------------------
+W_RRF = 0.5   # Weight for RRF/vector similarity score
+W_LLM = 0.5   # Weight for LLM ranking position
+
+
+# ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
+def _normalize_rrf_score(score: float, min_score: float = 0.0, max_score: float = 1.0) -> float:
+    """Normalize RRF score to 0-1 range."""
+    if max_score == min_score:
+        return 0.5
+    return max(0.0, min(1.0, (score - min_score) / (max_score - min_score)))
+
+
+def _llm_rank_to_score(rank: int, total: int) -> float:
+    """Convert LLM rank (1-based) to a 0-1 score (higher is better)."""
+    if total <= 1:
+        return 1.0
+    return (total - rank) / (total - 1)
+
+
+def _calculate_weighted_confidence(
+    reranked_results: list[dict[str, Any]],
+    original_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Calculate weighted confidence scores combining RRF similarity and LLM ranking.
+    
+    Formula: confidence = W_RRF * rrf_score + W_LLM * llm_rank_score
+    
+    Args:
+        reranked_results: Results in LLM-ranked order (list of dicts with code, description, explanation)
+        original_candidates: Original candidates with RRF scores (list of dicts with code, score)
+    
+    Returns:
+        Results with computed confidence scores (0-100 scale).
+    """
+    if not reranked_results:
+        return []
+    
+    # Build lookup for original RRF scores
+    score_lookup = {c["code"]: c["score"] for c in original_candidates}
+    
+    # Get min/max scores for normalization
+    all_scores = [c["score"] for c in original_candidates if "score" in c]
+    min_score = min(all_scores) if all_scores else 0.0
+    max_score = max(all_scores) if all_scores else 1.0
+    
+    total_results = len(reranked_results)
+    
+    # Calculate weighted confidence for each result
+    for i, result in enumerate(reranked_results):
+        code = result["code"]
+        llm_rank = i + 1  # 1-based rank
+        
+        # Get original RRF score (default to 0.5 if not found)
+        rrf_score = score_lookup.get(code, 0.5)
+        normalized_rrf = _normalize_rrf_score(rrf_score, min_score, max_score)
+        
+        # Convert LLM rank to score
+        llm_score = _llm_rank_to_score(llm_rank, total_results)
+        
+        # Weighted combination (0-1 range)
+        raw_confidence = (W_RRF * normalized_rrf) + (W_LLM * llm_score)
+        
+        # Scale to 0-100
+        result["confidence"] = int(raw_confidence * 100)
+        
+        # Add score info to explanation
+        if "explanation" in result and result["explanation"]:
+            result["explanation"] = f"{result['explanation']} (Similarity: {rrf_score:.3f}, Rank: #{llm_rank})"
+        else:
+            result["explanation"] = f"Similarity: {rrf_score:.3f}, Clinical rank: #{llm_rank}"
+    
+    return reranked_results
+
 
 def _clean_json_response(content: str) -> str:
     """Remove markdown code fences and extra whitespace from LLM JSON responses."""
@@ -58,9 +138,10 @@ def _clean_json_response(content: str) -> str:
 
 _RERANK_SYSTEM = (
     "You are a senior medical coder specialising in ICD-10-CM. "
-    "Given the original clinical text and a list of candidate ICD-10 codes with "
-    "their descriptions, select the most clinically accurate codes. "
-    "Return ONLY a valid JSON array (no markdown, no extra text) ordered from most "
+    "Given the ORIGINAL USER INPUT (what the user actually typed), the EXTRACTED MEDICAL ENTITY "
+    "(what we searched for), and a list of candidate ICD-10 codes, select the TOP 5 most "
+    "clinically accurate codes. "
+    "Return ONLY a valid JSON array with EXACTLY 5 elements (no more, no less), ordered from most "
     "to least relevant. Each element must have exactly these keys: "
     "\"code\" (string), \"description\" (string), "
     "\"confidence\" (integer 0-100, percent certainty this code applies), "
@@ -71,10 +152,9 @@ _RERANK_SYSTEM = (
     "- 60-74%: Good match, reasonable code choice\n"
     "- 40-59%: Moderate match, possible but not ideal\n"
     "- Below 40%: Weak match, consider only if no better options\n\n"
-    "If the clinical text is brief or vague, interpret it using standard medical "
-    "conventions and still assign appropriate confidence based on how well each "
-    "code matches the stated information. The candidates have already been retrieved "
-    "by vector similarity, so they are semantically related - focus on clinical accuracy."
+    "IMPORTANT: Always return exactly 5 codes. Use the ORIGINAL USER INPUT to understand context "
+    "and intent. The extracted entity is what we searched for, but the original input provides "
+    "important clinical context for proper code selection."
 )
 
 
@@ -85,32 +165,40 @@ _RERANK_SYSTEM = (
 async def rerank_codes(
     original_query: str,
     candidates: list[dict[str, Any]],
+    original_user_input: str = None,
 ) -> list[dict[str, Any]]:
     """
-    Re-rank Qdrant candidates with an LLM and return the top FINAL_TOP_N.
+    Re-rank Qdrant candidates with an LLM and return exactly FINAL_TOP_N (5) codes.
 
     Args:
-        original_query: The original clinical text (used for clinical context).
+        original_query: The extracted medical entity (what we searched for).
         candidates: List of dicts, each containing at minimum:
                     {"code": str, "description": str, "score": float}
+        original_user_input: The original text the user typed (for context).
 
     Returns:
-        List of up to FINAL_TOP_N dicts:
+        List of exactly FINAL_TOP_N (5) dicts:
         [{"code": str, "description": str, "confidence": int, "explanation": str}, ...]
     """
     if not candidates:
         return []
 
+    # Use original_user_input if provided, otherwise fall back to original_query
+    user_input = original_user_input if original_user_input else original_query
+
     logger.debug("rerank_codes | %d candidates to re-rank", len(candidates))
+    console_logger.info(f"\n🤖 LLM RERANKING:")
+    console_logger.info(f"   Original input: '{user_input}'")
+    console_logger.info(f"   Extracted entity: '{original_query}'")
+    console_logger.info(f"   Candidates to evaluate: {len(candidates)}")
 
     # Build a compact representation of candidates for the prompt
-    # Include similarity scores as a reference point
+    # Only pass code and description - NO scores (let LLM judge purely on clinical merit)
     candidates_text = json.dumps(
         [
             {
                 "code": c["code"],
                 "description": c["description"],
-                "similarity": round(c["score"] * 100),  # Convert 0-1 to percentage
             }
             for c in candidates
         ],
@@ -118,11 +206,11 @@ async def rerank_codes(
     )
 
     user_message = (
-        f"Clinical text:\n{original_query}\n\n"
+        f"ORIGINAL USER INPUT (what the user typed):\n\"{user_input}\"\n\n"
+        f"EXTRACTED MEDICAL ENTITY (what we searched for):\n\"{original_query}\"\n\n"
         f"Candidate ICD-10 codes ({len(candidates)} total):\n{candidates_text}\n\n"
-        f"Note: 'similarity' shows the vector embedding similarity (0-100). "
-        f"Use this as a starting reference, but adjust confidence based on clinical accuracy.\n\n"
-        f"Return the top {FINAL_TOP_N} most appropriate codes."
+        f"Evaluate each code based purely on clinical accuracy and relevance to the input.\n\n"
+        f"Return EXACTLY {FINAL_TOP_N} codes in a JSON array, ordered by relevance."
     )
 
     input_tokens = output_tokens = total_tokens = None
@@ -139,7 +227,7 @@ async def rerank_codes(
                     contents=prompt,
                     config={"temperature": 0},
                 ),
-                timeout=20.0,
+                timeout=60.0,
             )
             content = response.text.strip()
             if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -157,7 +245,7 @@ async def rerank_codes(
                         {"role": "user", "content": user_message},
                     ],
                 ),
-                timeout=20.0,
+                timeout=60.0,
             )
             content = response.choices[0].message.content.strip()
             if response.usage:
@@ -166,7 +254,7 @@ async def rerank_codes(
                 total_tokens  = response.usage.total_tokens
 
     except asyncio.TimeoutError:
-        error_msg = "LLM API timeout (> 20 s)"
+        error_msg = "LLM API timeout (> 60 s)"
         logger.error("rerank_codes | %s; falling back to score-based ranking", error_msg)
 
     except Exception as e:
@@ -205,6 +293,10 @@ async def rerank_codes(
         reranked: list[dict[str, Any]] = json.loads(content)
         if not isinstance(reranked, list):
             raise ValueError("Expected a JSON array")
+        
+        # Apply weighted confidence scoring (RRF + LLM rank) with descending order enforcement
+        reranked = _calculate_weighted_confidence(reranked[:FINAL_TOP_N], candidates)
+        
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning(
             "rerank_codes | JSON parse failed (%s); content='%s'; returning top candidates by score",

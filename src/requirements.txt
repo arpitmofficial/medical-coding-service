@@ -1,0 +1,9 @@
+# Shared API dependencies
+fastapi>=0.111
+uvicorn[standard]>=0.29
+python-dotenv>=1.0
+pydantic>=2.0
+
+# Model-specific deps are in model-icd-10/requirements.txt
+# Install both:
+#   pip install -r requirements.txt -r model-icd-10/requirements.txt
