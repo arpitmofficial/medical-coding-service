@@ -1,27 +1,35 @@
 from __future__ import annotations
 
 import asyncio
-
 import logging
 from typing import Dict, List, Any
 import time
 
-import httpx
+import torch
+from transformers import AutoTokenizer, AutoModel
 from fastembed import SparseTextEmbedding
 
-from app.config import JINA_API_KEY
 from app.execution_analysis import tracker
 
 logger = logging.getLogger(__name__)
 
-# --- Dense Embeddings (Jina) ---
-_JINA_URL = "https://api.jina.ai/v1/embeddings"
-_JINA_MODEL = "jina-embeddings-v2-base-en"
+# --- Dense Embeddings (SapBERT - Local) ---
+_sapbert_model = None
+_sapbert_tokenizer = None
+_device = None
 
-_JINA_HEADERS = {
-    "Authorization": f"Bearer {JINA_API_KEY}",
-    "Content-Type": "application/json",
-}
+
+def _get_sapbert_model():
+    """Get or initialize the SapBERT model (singleton pattern)."""
+    global _sapbert_model, _sapbert_tokenizer, _device
+    if _sapbert_model is None:
+        logger.debug("Initializing SapBERT model locally...")
+        _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        _sapbert_tokenizer = AutoTokenizer.from_pretrained("cambridgeltl/SapBERT-from-PubMedBERT-fulltext")
+        _sapbert_model = AutoModel.from_pretrained("cambridgeltl/SapBERT-from-PubMedBERT-fulltext").to(_device)
+        _sapbert_model.eval()
+        logger.debug("SapBERT model loaded on %s", _device)
+    return _sapbert_model, _sapbert_tokenizer, _device
 
 # --- Sparse Embeddings (BM25-like) ---
 # Initialize sparse embedding model (lazy loading)
@@ -38,31 +46,39 @@ def _get_sparse_model() -> SparseTextEmbedding:
 
 
 async def get_embeddings_batch(texts: list[str], max_retries: int = 3) -> list[list[float]]:
-    """Return a list of dense embedding vectors for the given texts (async) with retries."""
+    """Return a list of dense embedding vectors for the given texts using local SapBERT."""
     if not texts:
         return []
-
-    payload = {
-        "input": texts,
-        "model": _JINA_MODEL,
-    }
 
     logger.debug("get_embeddings_batch | embedding %d text(s)", len(texts))
 
     t0 = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(_JINA_URL, headers=_JINA_HEADERS, json=payload)
-            response.raise_for_status()
-        api_elapsed = time.perf_counter() - t0
-        tracker.record_api_call("embedding.py", "Jina Embeddings API", api_elapsed)
+        model, tokenizer, device = _get_sapbert_model()
+        
+        # Tokenize all texts
+        encoded = tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=128,
+            return_tensors="pt"
+        ).to(device)
+        
+        # Generate embeddings
+        with torch.no_grad():
+            outputs = model(**encoded)
+            # Use [CLS] token embeddings (first token)
+            embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+        
+        elapsed = time.perf_counter() - t0
+        tracker.record_api_call("embedding.py", "SapBERT Local Embeddings", elapsed)
+        
+        return embeddings.tolist()
     except Exception as e:
-        api_elapsed = time.perf_counter() - t0
-        tracker.record_api_call("embedding.py", "Jina Embeddings API", api_elapsed, error=str(e))
+        elapsed = time.perf_counter() - t0
+        tracker.record_api_call("embedding.py", "SapBERT Local Embeddings", elapsed, error=str(e))
         raise
-
-    data = response.json()
-    return [item["embedding"] for item in data["data"]]
 
 
 async def get_sparse_embeddings_batch(texts: list[str]) -> list[dict[str, Any]]:
@@ -100,4 +116,3 @@ async def get_sparse_embeddings_batch(texts: list[str]) -> list[dict[str, Any]]:
         tracker.record_api_call("embedding.py", "BM25 Sparse Embeddings", api_elapsed, error=str(e))
         logger.error("get_sparse_embeddings_batch | error: %s", e)
         raise
-    return [item["embedding"] for item in data["data"]]

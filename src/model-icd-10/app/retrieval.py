@@ -9,7 +9,7 @@ Stage 0 — Intent parsing
     cleanly to ICD-10 codes.
 
 Stage 1 — Qdrant vector search (per entity)
-    Each entity is embedded with jina-embeddings-v2-base-en and the top
+    Each entity is embedded with SapBERT and the top
     QDRANT_TOP_K candidates are fetched from Qdrant.  Results from all
     entities are merged and deduplicated by ICD-10 code, keeping the highest
     similarity score for each.

@@ -1,9 +1,9 @@
 """
-LLM-Powered Re-ranking
-======================
+LLM-Powered Re-ranking for CPT Coding
+=====================================
 
 Takes vector search candidates and re-ranks them using clinical reasoning
-from an LLM. Returns the most clinically relevant codes with confidence
+from an LLM. Returns the most clinically relevant CPT codes with confidence
 scores and explanations.
 """
 
@@ -12,11 +12,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import time
+from pathlib import Path
 from typing import Any
+
+# Resolve paths
+MODEL_CPT_DIR = Path(__file__).resolve().parent.parent
+MODEL_ICD10_DIR = MODEL_CPT_DIR.parent / "model-icd-10"
+
+# Temporarily add ICD-10 to path to load shared modules
+_original_path = sys.path.copy()
+sys.path.insert(0, str(MODEL_ICD10_DIR))
 
 from app.config import LLM_API_KEY, LLM_MODEL, FINAL_TOP_N, console_logger
 from app.execution_analysis import tracker
+
+# Restore original path
+sys.path = _original_path
 
 logger = logging.getLogger(__name__)
 
@@ -133,25 +146,30 @@ def _clean_json_response(content: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Prompt template
+# Prompt template - MODIFIED FOR CPT CODING
 # ---------------------------------------------------------------------------
 
 _RERANK_SYSTEM = (
-    "You are a senior medical coder specialising in ICD-10-CM. "
-    "Given the ORIGINAL USER INPUT (what the user actually typed), the EXTRACTED MEDICAL ENTITY "
-    "(what we searched for), and a list of candidate ICD-10 codes, select the TOP 5 most "
+    "You are a senior medical coder specialising in CPT (Current Procedural Terminology). "
+    "Given the ORIGINAL USER INPUT (what the user actually typed), the EXTRACTED PROCEDURAL ENTITY "
+    "(what we searched for), and a list of candidate CPT codes, select the TOP 5 most "
     "clinically accurate codes. "
-    f"Return ONLY a valid JSON array with EXACTLY {FINAL_TOP_N} elements (no more, no less), ordered from most "
+    "Return ONLY a valid JSON array with EXACTLY 5 elements (no more, no less), ordered from most "
     "to least relevant. Each element must have exactly these keys: "
     "\"code\" (string), \"description\" (string), "
     "\"confidence\" (integer 0-100, percent certainty this code applies), "
     "\"explanation\" (one sentence justifying the match).\n\n"
+    "Evaluation criteria (in order of priority):\n"
+    "1. PROCEDURE TYPE MATCH: Does the CPT code describe the same type of procedure?\n"
+    "2. TECHNIQUE: If surgical approach is mentioned (laparoscopic, open, arthroscopic), prioritize matching technique.\n"
+    "3. ANATOMICAL SITE: Does the body region/organ match?\n"
+    "4. SPECIFICITY: Prefer more specific codes over general ones when the clinical text supports it.\n\n"
     "Confidence scoring guidelines:\n"
-    "- 90-100%: Perfect semantic match with the clinical text\n"
-    "- 75-89%: Strong match, highly appropriate code\n"
-    "- 60-74%: Good match, reasonable code choice\n"
-    "- 40-59%: Moderate match, possible but not ideal\n"
-    "- Below 40%: Weak match, consider only if no better options\n\n"
+    "- 90-100%: Perfect match - procedure type, technique, and anatomy all match\n"
+    "- 75-89%: Strong match - procedure type matches with minor differences in specificity\n"
+    "- 60-74%: Good match - same general procedure category\n"
+    "- 40-59%: Moderate match - related procedure but different specificity or approach\n"
+    "- Below 40%: Weak match - only tangentially related\n\n"
     "IMPORTANT: Always return exactly 5 codes. Use the ORIGINAL USER INPUT to understand context "
     "and intent. The extracted entity is what we searched for, but the original input provides "
     "important clinical context for proper code selection."
@@ -171,7 +189,7 @@ async def rerank_codes(
     Re-rank Qdrant candidates with an LLM and return exactly FINAL_TOP_N (5) codes.
 
     Args:
-        original_query: The extracted medical entity (what we searched for).
+        original_query: The extracted procedural entity (what we searched for).
         candidates: List of dicts, each containing at minimum:
                     {"code": str, "description": str, "score": float}
         original_user_input: The original text the user typed (for context).
@@ -187,7 +205,7 @@ async def rerank_codes(
     user_input = original_user_input if original_user_input else original_query
 
     logger.debug("rerank_codes | %d candidates to re-rank", len(candidates))
-    console_logger.info(f"\n🤖 LLM RERANKING:")
+    console_logger.info(f"\n🤖 LLM RERANKING (CPT):")
     console_logger.info(f"   Original input: '{user_input}'")
     console_logger.info(f"   Extracted entity: '{original_query}'")
     console_logger.info(f"   Candidates to evaluate: {len(candidates)}")
@@ -207,9 +225,9 @@ async def rerank_codes(
 
     user_message = (
         f"ORIGINAL USER INPUT (what the user typed):\n\"{user_input}\"\n\n"
-        f"EXTRACTED MEDICAL ENTITY (what we searched for):\n\"{original_query}\"\n\n"
-        f"Candidate ICD-10 codes ({len(candidates)} total):\n{candidates_text}\n\n"
-        f"Evaluate each code based purely on clinical accuracy and relevance to the input.\n\n"
+        f"EXTRACTED PROCEDURAL ENTITY (what we searched for):\n\"{original_query}\"\n\n"
+        f"Candidate CPT codes ({len(candidates)} total):\n{candidates_text}\n\n"
+        f"Evaluate each code based purely on clinical accuracy and relevance to the procedure described.\n\n"
         f"Return EXACTLY {FINAL_TOP_N} codes in a JSON array, ordered by relevance."
     )
 

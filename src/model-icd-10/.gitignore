@@ -152,8 +152,6 @@ Desktop.ini
 # Project-specific
 *.log
 .keep
-test_*.py
-*_test.py
 migration_progress.json
 backup_*/
 

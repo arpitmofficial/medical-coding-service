@@ -6,9 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Jina Embeddings ---
-JINA_API_KEY = os.getenv("JINA_API_KEY")
-
 # --- Qdrant ---
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
