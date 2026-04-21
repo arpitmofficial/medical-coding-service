@@ -20,11 +20,27 @@ from app.execution_analysis import tracker
 logger = logging.getLogger(__name__)
 
 # Detect which API to use based on the model name
-_is_gemini = LLM_MODEL.startswith("gemini")
+# _is_gemini = LLM_MODEL.startswith("gemini")
+
+# if _is_gemini:
+#     from google import genai
+#     _gemini_client = genai.Client(api_key=LLM_API_KEY)
+
+
+# Add Groq support: treat Llama/Mixtral as OpenAI-compatible but with Groq endpoint
+_is_gemini = LLM_MODEL.startswith("gemini") or LLM_MODEL.startswith("gemma")
+_is_groq = LLM_MODEL.startswith("llama") or LLM_MODEL.startswith("mixtral")
 
 if _is_gemini:
     from google import genai
+    # This client works for BOTH Gemini and Gemma models from AI Studio
     _gemini_client = genai.Client(api_key=LLM_API_KEY)
+elif _is_groq:
+    from openai import AsyncOpenAI
+    _client = AsyncOpenAI(
+        api_key=LLM_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
 else:
     from openai import AsyncOpenAI
     _client = AsyncOpenAI(api_key=LLM_API_KEY)
@@ -196,6 +212,6 @@ async def parse_entities(raw_text: str) -> list[str]:
     logger.debug("parse_entities | extracted %d entities: %s", len(unique), unique)
     
     # Show extracted entities in console
-    console_logger.info(f"🧠 LLM Entity Extraction: {unique}")
+    console_logger.info(f" LLM Entity Extraction: {unique}")
     
     return unique

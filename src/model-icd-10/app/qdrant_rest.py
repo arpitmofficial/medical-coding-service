@@ -227,7 +227,7 @@ async def search_vectors_debug(
     async with httpx.AsyncClient(timeout=30) as client:
         # 1. Dense-only search (top 30)
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(f"🔵 DENSE (SEMANTIC) SEARCH RESULTS (top {DENSE_SEARCH_LIMIT}):")
+        console_logger.info(f" DENSE (SEMANTIC) SEARCH RESULTS (top {DENSE_SEARCH_LIMIT}):")
         console_logger.info(f"{'='*60}")
         
         dense_payload = {
@@ -249,7 +249,7 @@ async def search_vectors_debug(
         
         # 2. Sparse-only search (top 20)
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(f"🟡 SPARSE (KEYWORD/BM25) SEARCH RESULTS (top {SPARSE_SEARCH_LIMIT}):")
+        console_logger.info(f" SPARSE (KEYWORD/BM25) SEARCH RESULTS (top {SPARSE_SEARCH_LIMIT}):")
         console_logger.info(f"{'='*60}")
         
         sparse_payload = {
@@ -271,7 +271,7 @@ async def search_vectors_debug(
         
         # 3. Hybrid search with RRF (combines dense 30 + sparse 20 → top 50)
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(f"🟢 HYBRID (RRF FUSION) SEARCH RESULTS (top {HYBRID_RESULT_LIMIT}):")
+        console_logger.info(f" HYBRID (RRF FUSION) SEARCH RESULTS (top {HYBRID_RESULT_LIMIT}):")
         console_logger.info(f"{'='*60}")
         
         hybrid_payload = {

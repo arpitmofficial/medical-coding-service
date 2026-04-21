@@ -16,15 +16,16 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "icd10_hybrid"
-EXCEL_FILE_PATH = "/home/arpit-mahtele/Desktop/projects/project-monorepo-team-30/src/icd10cm_codes_2026.xlsx"  # UPDATE THIS PATH!
+# Path relative to this script's parent directory (model-icd-10/)
+EXCEL_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icd10cm_codes_2026.xlsx")
 
 async def setup_collection(client: httpx.AsyncClient):
-    """Deletes old collection and creates a fresh hybrid one."""
     logger.info(f"Recreating hybrid collection: {COLLECTION_NAME}...")
     
     # Ignore 404 if it doesn't exist yet
     await client.delete(f"{QDRANT_URL}/collections/{COLLECTION_NAME}", headers=QDRANT_HEADERS)
     
+    # SapBERT produces 768-dimensional embeddings
     schema_payload = {
         "vectors": {
             "dense": {"size": 768, "distance": "Cosine"}
@@ -40,7 +41,8 @@ async def setup_collection(client: httpx.AsyncClient):
         json=schema_payload
     )
     res.raise_for_status()
-    logger.info("✅ Hybrid collection ready.")
+    logger.info(" Hybrid collection ready.")
+
 
 async def ingest_from_excel():
     # 1. Read the Excel file
@@ -57,22 +59,19 @@ async def ingest_from_excel():
     logger.info(f"Found {total_records} valid ICD-10 records.")
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # await setup_collection(client)
-
-        # batch_size = 100
-        # total_uploaded = 0
+        await setup_collection(client)
 
         batch_size = 100
-        total_uploaded = 19700
+        total_uploaded = 0
 
         # 2. Process in batches
-        for start_idx in range(19700, total_records, batch_size):
+        for start_idx in range(0, total_records, batch_size):
             batch_df = df.iloc[start_idx : start_idx + batch_size]
             
             codes = batch_df[code_column].astype(str).tolist()
             descriptions = batch_df[description_column].astype(str).tolist()
 
-            # 3. Generate BOTH Dense (Jina) and Sparse (BM25) vectors locally
+            # 3. Generate BOTH Dense (SapBERT) and Sparse (BM25) vectors locally
             logger.info(f"Generating vectors for batch {start_idx} to {start_idx + len(codes)}...")
             
             # We embed the descriptions to capture the medical meaning
@@ -107,9 +106,9 @@ async def ingest_from_excel():
             res.raise_for_status()
             
             total_uploaded += len(points)
-            logger.info(f"✅ Uploaded {total_uploaded}/{total_records} points.")
+            logger.info(f" Uploaded {total_uploaded}/{total_records} points.")
 
-        logger.info("🎉 Full Excel ingestion complete!")
+        logger.info(" Full Excel ingestion complete!")
 
 if __name__ == "__main__":
     asyncio.run(ingest_from_excel())

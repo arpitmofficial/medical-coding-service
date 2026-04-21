@@ -6,9 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Jina Embeddings ---
-JINA_API_KEY = os.getenv("JINA_API_KEY")
-
 # --- Qdrant ---
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
@@ -33,8 +30,8 @@ MIN_SCORE: float = float(os.getenv("MIN_SCORE", "0.0"))     # no score cutoff (w
 def setup_logging():
     """Configure clean logging: detailed file logs + minimal console output."""
     
-    # Create logs directory inside src/
-    src_dir = Path(__file__).resolve().parent.parent
+    # Create a shared logs directory inside src/ for all model pipelines.
+    src_dir = Path(__file__).resolve().parents[2]
     log_dir = src_dir / "logs"
     log_dir.mkdir(exist_ok=True)
     
@@ -82,14 +79,14 @@ def setup_logging():
     
     status_handler = logging.StreamHandler()
     status_handler.setLevel(logging.INFO)
-    status_formatter = logging.Formatter('🔍 %(message)s')
+    status_formatter = logging.Formatter('%(message)s')
     status_handler.setFormatter(status_formatter)
     console_logger.addHandler(status_handler)
     
     # Also log status to file
     console_logger.addHandler(file_handler)
     
-    print("✅ Logging configured: detailed logs → logs/medical_coding.log")
+    print("Logging configured: detailed logs -> logs/medical_coding.log")
     return console_logger
 
 # Initialize logging

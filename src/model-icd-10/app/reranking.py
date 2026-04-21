@@ -24,11 +24,26 @@ logger = logging.getLogger(__name__)
 _original_user_input: str = ""
 
 # Detect which API to use based on the model name
-_is_gemini = LLM_MODEL.startswith("gemini")
+# _is_gemini = LLM_MODEL.startswith("gemini")
+
+# if _is_gemini:
+#     from google import genai
+#     _gemini_client = genai.Client(api_key=LLM_API_KEY)
+
+# Add Groq support: treat Llama/Mixtral as OpenAI-compatible but with Groq endpoint
+_is_gemini = LLM_MODEL.startswith("gemini") or LLM_MODEL.startswith("gemma")
+_is_groq = LLM_MODEL.startswith("llama") or LLM_MODEL.startswith("mixtral")
 
 if _is_gemini:
     from google import genai
+    # This client works for BOTH Gemini and Gemma models from AI Studio
     _gemini_client = genai.Client(api_key=LLM_API_KEY)
+elif _is_groq:
+    from openai import AsyncOpenAI
+    _client = AsyncOpenAI(
+        api_key=LLM_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
 else:
     from openai import AsyncOpenAI
     _client = AsyncOpenAI(api_key=LLM_API_KEY)
@@ -141,7 +156,7 @@ _RERANK_SYSTEM = (
     "Given the ORIGINAL USER INPUT (what the user actually typed), the EXTRACTED MEDICAL ENTITY "
     "(what we searched for), and a list of candidate ICD-10 codes, select the TOP 5 most "
     "clinically accurate codes. "
-    "Return ONLY a valid JSON array with EXACTLY 5 elements (no more, no less), ordered from most "
+    f"Return ONLY a valid JSON array with EXACTLY {FINAL_TOP_N} elements (no more, no less), ordered from most "
     "to least relevant. Each element must have exactly these keys: "
     "\"code\" (string), \"description\" (string), "
     "\"confidence\" (integer 0-100, percent certainty this code applies), "
@@ -187,7 +202,7 @@ async def rerank_codes(
     user_input = original_user_input if original_user_input else original_query
 
     logger.debug("rerank_codes | %d candidates to re-rank", len(candidates))
-    console_logger.info(f"\n🤖 LLM RERANKING:")
+    console_logger.info(f"\n LLM RERANKING:")
     console_logger.info(f"   Original input: '{user_input}'")
     console_logger.info(f"   Extracted entity: '{original_query}'")
     console_logger.info(f"   Candidates to evaluate: {len(candidates)}")

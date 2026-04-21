@@ -1,0 +1,33 @@
+# Shared ignore rules for src/
+
+# Environment and local secrets
+.env
+.env.*
+
+# Logs and runtime artifacts
+logs/
+**/logs/
+*.log
+
+# Python caches and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+.~lock.*#
+
+# Test output artifacts
+**/scripts/Testing/results/
+
+# Editor folders
+.vscode/
+.idea/
+
+# Notebook checkpoints
+.ipynb_checkpoints/

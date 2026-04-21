@@ -68,7 +68,7 @@ async def detect_database_capability():
                 # Alternative syntax: vectors.dense + sparse_vectors.sparse
                 if "dense" in vectors_config and "sparse" in sparse_vectors_config:
                     _detected_capability = "hybrid_alt"
-                    console_logger.info("Hybrid Search ENABLED (✨ Dense + Sparse vectors with RRF fusion)")
+                    console_logger.info("Hybrid Search ENABLED ( Dense + Sparse vectors with RRF fusion)")
                 else:
                     _detected_capability = "named_dense" 
                     console_logger.info("Dense-only search (consider upgrading to hybrid)")
@@ -77,7 +77,7 @@ async def detect_database_capability():
                 # Check for named vectors format
                 if "dense" in vectors_config and "sparse" in vectors_config:
                     _detected_capability = "hybrid"
-                    console_logger.info("Hybrid Search ENABLED (✨ Dense + Sparse vectors with RRF fusion)")
+                    console_logger.info("Hybrid Search ENABLED ( Dense + Sparse vectors with RRF fusion)")
                 elif "dense" in vectors_config:
                     _detected_capability = "named_dense"
                     console_logger.info("Dense-only search (consider upgrading to hybrid)")
@@ -120,7 +120,7 @@ async def adaptive_search_single_entity(
             
             if debug:
                 # Show detailed breakdown of each search stage
-                console_logger.info(f"\n📊 Searching for entity: '{entity}'")
+                console_logger.info(f"\n Searching for entity: '{entity}'")
                 debug_results = await search_vectors_debug(
                     dense_vector=dense_vectors[0],
                     sparse_vector=sparse_vectors[0],
@@ -299,7 +299,7 @@ async def adaptive_retrieve_icd_candidates(
     tracker.end_module("reranking.py")
 
     if reranked:
-        console_logger.info(f"✅ Found {len(reranked)} ICD-10 code(s) | Top result: {reranked[0]['code']} ({reranked[0]['confidence']}%)")
+        console_logger.info(f" Found {len(reranked)} ICD-10 code(s) | Top result: {reranked[0]['code']} ({reranked[0]['confidence']}%)")
     else:
         console_logger.error("LLM re-ranking returned no results")
         
