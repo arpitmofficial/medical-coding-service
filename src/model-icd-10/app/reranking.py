@@ -24,27 +24,47 @@ logger = logging.getLogger(__name__)
 _original_user_input: str = ""
 
 # Detect which API to use based on the model name
-_is_gemini = LLM_MODEL.startswith("gemini")
+# _is_gemini = LLM_MODEL.startswith("gemini")
+
+# if _is_gemini:
+#     from google import genai
+#     _gemini_client = genai.Client(api_key=LLM_API_KEY)
+
+# Add Groq support: treat Llama/Mixtral as OpenAI-compatible but with Groq endpoint
+_is_gemini = LLM_MODEL.startswith("gemini") or LLM_MODEL.startswith("gemma")
+_is_groq = LLM_MODEL.startswith("llama") or LLM_MODEL.startswith("mixtral")
 
 if _is_gemini:
     from google import genai
+
+    # This client works for BOTH Gemini and Gemma models from AI Studio
     _gemini_client = genai.Client(api_key=LLM_API_KEY)
+elif _is_groq:
+    from openai import AsyncOpenAI
+
+    _client = AsyncOpenAI(
+        api_key=LLM_API_KEY, base_url="https://api.groq.com/openai/v1"
+    )
 else:
     from openai import AsyncOpenAI
+
     _client = AsyncOpenAI(api_key=LLM_API_KEY)
 
 # ---------------------------------------------------------------------------
 # Confidence Score Weights (tune these based on your evaluation data)
 # ---------------------------------------------------------------------------
-W_RRF = 0.5   # Weight for RRF/vector similarity score
-W_LLM = 0.5   # Weight for LLM ranking position
+W_RRF = 0.5  # Weight for RRF/vector similarity score
+W_LLM = 0.5  # Weight for LLM ranking position
 
 
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def _normalize_rrf_score(score: float, min_score: float = 0.0, max_score: float = 1.0) -> float:
+
+def _normalize_rrf_score(
+    score: float, min_score: float = 0.0, max_score: float = 1.0
+) -> float:
     """Normalize RRF score to 0-1 range."""
     if max_score == min_score:
         return 0.5
@@ -64,71 +84,75 @@ def _calculate_weighted_confidence(
 ) -> list[dict[str, Any]]:
     """
     Calculate weighted confidence scores combining RRF similarity and LLM ranking.
-    
+
     Formula: confidence = W_RRF * rrf_score + W_LLM * llm_rank_score
-    
+
     Args:
         reranked_results: Results in LLM-ranked order (list of dicts with code, description, explanation)
         original_candidates: Original candidates with RRF scores (list of dicts with code, score)
-    
+
     Returns:
         Results with computed confidence scores (0-100 scale).
     """
     if not reranked_results:
         return []
-    
+
     # Build lookup for original RRF scores
     score_lookup = {c["code"]: c["score"] for c in original_candidates}
-    
+
     # Get min/max scores for normalization
     all_scores = [c["score"] for c in original_candidates if "score" in c]
     min_score = min(all_scores) if all_scores else 0.0
     max_score = max(all_scores) if all_scores else 1.0
-    
+
     total_results = len(reranked_results)
-    
+
     # Calculate weighted confidence for each result
     for i, result in enumerate(reranked_results):
         code = result["code"]
         llm_rank = i + 1  # 1-based rank
-        
+
         # Get original RRF score (default to 0.5 if not found)
         rrf_score = score_lookup.get(code, 0.5)
         normalized_rrf = _normalize_rrf_score(rrf_score, min_score, max_score)
-        
+
         # Convert LLM rank to score
         llm_score = _llm_rank_to_score(llm_rank, total_results)
-        
+
         # Weighted combination (0-1 range)
         raw_confidence = (W_RRF * normalized_rrf) + (W_LLM * llm_score)
-        
+
         # Scale to 0-100
         result["confidence"] = int(raw_confidence * 100)
-        
+
         # Add score info to explanation
         if "explanation" in result and result["explanation"]:
-            result["explanation"] = f"{result['explanation']} (Similarity: {rrf_score:.3f}, Rank: #{llm_rank})"
+            result["explanation"] = (
+                f"{result['explanation']} (Similarity: {rrf_score:.3f}, Rank: #{llm_rank})"
+            )
         else:
-            result["explanation"] = f"Similarity: {rrf_score:.3f}, Clinical rank: #{llm_rank}"
-    
+            result["explanation"] = (
+                f"Similarity: {rrf_score:.3f}, Clinical rank: #{llm_rank}"
+            )
+
     return reranked_results
 
 
 def _clean_json_response(content: str) -> str:
     """Remove markdown code fences and extra whitespace from LLM JSON responses."""
     content = content.strip()
-    
+
     # Remove markdown code fences (```json ... ``` or ``` ... ```)
     if content.startswith("```"):
         # Find the end of the opening fence (could be ```json or just ```)
         first_newline = content.find("\n")
         if first_newline != -1:
-            content = content[first_newline + 1:]
-        
+            content = content[first_newline + 1 :]
+
         # Remove closing fence
         if content.endswith("```"):
             content = content[:-3]
-    
+
     return content.strip()
 
 
@@ -143,9 +167,9 @@ _RERANK_SYSTEM = (
     "clinically accurate codes. "
     f"Return ONLY a valid JSON array with EXACTLY {FINAL_TOP_N} elements (no more, no less), ordered from most "
     "to least relevant. Each element must have exactly these keys: "
-    "\"code\" (string), \"description\" (string), "
-    "\"confidence\" (integer 0-100, percent certainty this code applies), "
-    "\"explanation\" (one sentence justifying the match).\n\n"
+    '"code" (string), "description" (string), '
+    '"confidence" (integer 0-100, percent certainty this code applies), '
+    '"explanation" (one sentence justifying the match).\n\n'
     "Confidence scoring guidelines:\n"
     "- 90-100%: Perfect semantic match with the clinical text\n"
     "- 75-89%: Strong match, highly appropriate code\n"
@@ -161,6 +185,7 @@ _RERANK_SYSTEM = (
 # ---------------------------------------------------------------------------
 # Public async function
 # ---------------------------------------------------------------------------
+
 
 async def rerank_codes(
     original_query: str,
@@ -187,7 +212,7 @@ async def rerank_codes(
     user_input = original_user_input if original_user_input else original_query
 
     logger.debug("rerank_codes | %d candidates to re-rank", len(candidates))
-    console_logger.info(f"\n🤖 LLM RERANKING:")
+    console_logger.info(f"\n LLM RERANKING:")
     console_logger.info(f"   Original input: '{user_input}'")
     console_logger.info(f"   Extracted entity: '{original_query}'")
     console_logger.info(f"   Candidates to evaluate: {len(candidates)}")
@@ -202,12 +227,12 @@ async def rerank_codes(
             }
             for c in candidates
         ],
-        indent=2,   
+        indent=2,
     )
 
     user_message = (
-        f"ORIGINAL USER INPUT (what the user typed):\n\"{user_input}\"\n\n"
-        f"EXTRACTED MEDICAL ENTITY (what we searched for):\n\"{original_query}\"\n\n"
+        f'ORIGINAL USER INPUT (what the user typed):\n"{user_input}"\n\n'
+        f'EXTRACTED MEDICAL ENTITY (what we searched for):\n"{original_query}"\n\n'
         f"Candidate ICD-10 codes ({len(candidates)} total):\n{candidates_text}\n\n"
         f"Evaluate each code based purely on clinical accuracy and relevance to the input.\n\n"
         f"Return EXACTLY {FINAL_TOP_N} codes in a JSON array, ordered by relevance."
@@ -232,9 +257,9 @@ async def rerank_codes(
             content = response.text.strip()
             if hasattr(response, "usage_metadata") and response.usage_metadata:
                 um = response.usage_metadata
-                input_tokens  = getattr(um, "prompt_token_count", None)
+                input_tokens = getattr(um, "prompt_token_count", None)
                 output_tokens = getattr(um, "candidates_token_count", None)
-                total_tokens  = getattr(um, "total_token_count", None)
+                total_tokens = getattr(um, "total_token_count", None)
         else:
             response = await asyncio.wait_for(
                 _client.chat.completions.create(
@@ -249,27 +274,41 @@ async def rerank_codes(
             )
             content = response.choices[0].message.content.strip()
             if response.usage:
-                input_tokens  = response.usage.prompt_tokens
+                input_tokens = response.usage.prompt_tokens
                 output_tokens = response.usage.completion_tokens
-                total_tokens  = response.usage.total_tokens
+                total_tokens = response.usage.total_tokens
 
     except asyncio.TimeoutError:
         error_msg = "LLM API timeout (> 60 s)"
-        logger.error("rerank_codes | %s; falling back to score-based ranking", error_msg)
+        logger.error(
+            "rerank_codes | %s; falling back to score-based ranking", error_msg
+        )
 
     except Exception as e:
         err_type = type(e).__name__
         status_code = getattr(e, "status_code", None) or getattr(e, "code", None)
-        if status_code == 429 or "RateLimit" in err_type or "ResourceExhausted" in err_type or "quota" in str(e).lower():
+        if (
+            status_code == 429
+            or "RateLimit" in err_type
+            or "ResourceExhausted" in err_type
+            or "quota" in str(e).lower()
+        ):
             error_msg = f"LLM rate-limited / high traffic ({err_type})"
         else:
             error_msg = f"{err_type}: {e}"
-        logger.error("rerank_codes | LLM error — %s; falling back to score-based ranking", error_msg)
+        logger.error(
+            "rerank_codes | LLM error — %s; falling back to score-based ranking",
+            error_msg,
+        )
 
     api_elapsed = time.perf_counter() - t0
     tracker.record_api_call(
-        "reranking.py", "LLM (rerank_codes)", api_elapsed,
-        input_tokens, output_tokens, total_tokens,
+        "reranking.py",
+        "LLM (rerank_codes)",
+        api_elapsed,
+        input_tokens,
+        output_tokens,
+        total_tokens,
         error=error_msg,
     )
 
@@ -282,10 +321,11 @@ async def rerank_codes(
                 "confidence": round(c["score"] * 100),
                 "explanation": "LLM re-ranking unavailable; ranked by vector similarity.",
             }
-            for c in sorted(candidates, key=lambda x: x["score"], reverse=True)[:FINAL_TOP_N]
+            for c in sorted(candidates, key=lambda x: x["score"], reverse=True)[
+                :FINAL_TOP_N
+            ]
         ]
 
-    
     # Clean markdown fences from response
     content = _clean_json_response(content)
 
@@ -293,15 +333,15 @@ async def rerank_codes(
         reranked: list[dict[str, Any]] = json.loads(content)
         if not isinstance(reranked, list):
             raise ValueError("Expected a JSON array")
-        
+
         # Apply weighted confidence scoring (RRF + LLM rank) with descending order enforcement
         reranked = _calculate_weighted_confidence(reranked[:FINAL_TOP_N], candidates)
-        
+
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning(
             "rerank_codes | JSON parse failed (%s); content='%s'; returning top candidates by score",
             exc,
-            content[:200]  # Log first 200 chars
+            content[:200],  # Log first 200 chars
         )
         # Graceful degradation: return top FINAL_TOP_N by Qdrant score
         reranked = [
@@ -311,7 +351,9 @@ async def rerank_codes(
                 "confidence": round(c["score"] * 100),
                 "explanation": "LLM re-ranking unavailable; ranked by vector similarity.",
             }
-            for c in sorted(candidates, key=lambda x: x["score"], reverse=True)[:FINAL_TOP_N]
+            for c in sorted(candidates, key=lambda x: x["score"], reverse=True)[
+                :FINAL_TOP_N
+            ]
         ]
 
     return reranked[:FINAL_TOP_N]

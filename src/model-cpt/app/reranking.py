@@ -10,6 +10,7 @@ scores and explanations.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import sys
@@ -25,11 +26,18 @@ MODEL_ICD10_DIR = MODEL_CPT_DIR.parent / "model-icd-10"
 _original_path = sys.path.copy()
 sys.path.insert(0, str(MODEL_ICD10_DIR))
 
-from app.config import LLM_API_KEY, LLM_MODEL, FINAL_TOP_N, console_logger
-from app.execution_analysis import tracker
+try:
+    _config = importlib.import_module("app.config")
+    _execution_analysis = importlib.import_module("app.execution_analysis")
+finally:
+    # Always restore original import path state
+    sys.path = _original_path
 
-# Restore original path
-sys.path = _original_path
+LLM_API_KEY = _config.LLM_API_KEY
+LLM_MODEL = _config.LLM_MODEL
+FINAL_TOP_N = _config.FINAL_TOP_N
+console_logger = _config.console_logger
+tracker = _execution_analysis.tracker
 
 logger = logging.getLogger(__name__)
 
@@ -160,12 +168,15 @@ _RERANK_SYSTEM = (
     "\"confidence\" (integer 0-100, percent certainty this code applies), "
     "\"explanation\" (one sentence justifying the match).\n\n"
     "Evaluation criteria (in order of priority):\n"
-    "1. PROCEDURE TYPE MATCH: Does the CPT code describe the same type of procedure?\n"
-    "2. TECHNIQUE: If surgical approach is mentioned (laparoscopic, open, arthroscopic), prioritize matching technique.\n"
+    "1. PROCEDURE TYPE MATCH: Does the CPT code describe the same type of "
+    "procedure?\n"
+    "2. TECHNIQUE: If surgical approach is mentioned (laparoscopic, open, "
+    "arthroscopic), prioritize matching technique.\n"
     "3. ANATOMICAL SITE: Does the body region/organ match?\n"
     "4. SPECIFICITY: Prefer more specific codes over general ones when the clinical text supports it.\n\n"
     "Confidence scoring guidelines:\n"
-    "- 90-100%: Perfect match - procedure type, technique, and anatomy all match\n"
+    "- 90-100%: Perfect match - procedure type, technique, and anatomy all "
+    "match\n"
     "- 75-89%: Strong match - procedure type matches with minor differences in specificity\n"
     "- 60-74%: Good match - same general procedure category\n"
     "- 40-59%: Moderate match - related procedure but different specificity or approach\n"
@@ -183,7 +194,7 @@ _RERANK_SYSTEM = (
 async def rerank_codes(
     original_query: str,
     candidates: list[dict[str, Any]],
-    original_user_input: str = None,
+    original_user_input: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Re-rank Qdrant candidates with an LLM and return exactly FINAL_TOP_N (5) codes.
@@ -205,7 +216,7 @@ async def rerank_codes(
     user_input = original_user_input if original_user_input else original_query
 
     logger.debug("rerank_codes | %d candidates to re-rank", len(candidates))
-    console_logger.info(f"\n🤖 LLM RERANKING (CPT):")
+    console_logger.info("\n LLM RERANKING (CPT):")
     console_logger.info(f"   Original input: '{user_input}'")
     console_logger.info(f"   Extracted entity: '{original_query}'")
     console_logger.info(f"   Candidates to evaluate: {len(candidates)}")
@@ -247,7 +258,7 @@ async def rerank_codes(
                 ),
                 timeout=60.0,
             )
-            content = response.text.strip()
+            content = (response.text or "").strip()
             if hasattr(response, "usage_metadata") and response.usage_metadata:
                 um = response.usage_metadata
                 input_tokens  = getattr(um, "prompt_token_count", None)
@@ -265,7 +276,7 @@ async def rerank_codes(
                 ),
                 timeout=60.0,
             )
-            content = response.choices[0].message.content.strip()
+            content = (response.choices[0].message.content or "").strip()
             if response.usage:
                 input_tokens  = response.usage.prompt_tokens
                 output_tokens = response.usage.completion_tokens
@@ -278,7 +289,12 @@ async def rerank_codes(
     except Exception as e:
         err_type = type(e).__name__
         status_code = getattr(e, "status_code", None) or getattr(e, "code", None)
-        if status_code == 429 or "RateLimit" in err_type or "ResourceExhausted" in err_type or "quota" in str(e).lower():
+        if (
+            status_code == 429
+            or "RateLimit" in err_type
+            or "ResourceExhausted" in err_type
+            or "quota" in str(e).lower()
+        ):
             error_msg = f"LLM rate-limited / high traffic ({err_type})"
         else:
             error_msg = f"{err_type}: {e}"

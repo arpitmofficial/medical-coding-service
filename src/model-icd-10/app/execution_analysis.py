@@ -74,7 +74,9 @@ class MetricsTracker:
             self._modules[module] = ModuleMetrics(module_name=module)
             self._module_order.append(module)
         self._modules[module].api_calls.append(
-            APICallRecord(api_name, elapsed, input_tokens, output_tokens, total_tokens, error)
+            APICallRecord(
+                api_name, elapsed, input_tokens, output_tokens, total_tokens, error
+            )
         )
 
     # ------------------------------------------------------------------
@@ -98,30 +100,47 @@ class MetricsTracker:
             print(f"  Total execution time: {mod.elapsed:.4f} s")
 
             if mod.api_calls:
-                print(f"  {'API Call':<30} {'Time (s)':>10} {'Status':<12} {'In Tok':>8} {'Out Tok':>8} {'Tot Tok':>8}")
+                print(
+                    f"  {'API Call':<30} {'Time (s)':>10} {'Status':<12} {'In Tok':>8} {'Out Tok':>8} {'Tot Tok':>8}"
+                )
                 print(f"  {THIN[:78]}")
                 for call in mod.api_calls:
                     status = f"ERROR: {call.error[:30]}" if call.error else "OK"
-                    in_t   = str(call.input_tokens)  if call.input_tokens  is not None else "-"
-                    out_t  = str(call.output_tokens) if call.output_tokens is not None else "-"
-                    tot_t  = str(call.total_tokens)  if call.total_tokens  is not None else "-"
-                    print(f"  {call.api_name:<30} {call.elapsed_sec:>10.4f} {status:<12} {in_t:>8} {out_t:>8} {tot_t:>8}")
+                    in_t = (
+                        str(call.input_tokens) if call.input_tokens is not None else "-"
+                    )
+                    out_t = (
+                        str(call.output_tokens)
+                        if call.output_tokens is not None
+                        else "-"
+                    )
+                    tot_t = (
+                        str(call.total_tokens) if call.total_tokens is not None else "-"
+                    )
+                    print(
+                        f"  {call.api_name:<30} {call.elapsed_sec:>10.4f} {status:<12} {in_t:>8} {out_t:>8} {tot_t:>8}"
+                    )
                     # Show thinking/external tokens if total > input + output
-                    if (call.input_tokens is not None and call.output_tokens is not None
-                            and call.total_tokens is not None):
+                    if (
+                        call.input_tokens is not None
+                        and call.output_tokens is not None
+                        and call.total_tokens is not None
+                    ):
                         io_sum = call.input_tokens + call.output_tokens
                         if call.total_tokens > io_sum:
                             thinking = call.total_tokens - io_sum
-                            print(f"  {'':30} {'':>10} {'':12} (incl. {thinking} thinking tokens)")
+                            print(
+                                f"  {'':30} {'':>10} {'':12} (incl. {thinking} thinking tokens)"
+                            )
                     if call.error:
                         print(f"  {'':30}   !! {call.error}")
 
                     if call.input_tokens is not None:
-                        grand_input_tokens  += call.input_tokens
+                        grand_input_tokens += call.input_tokens
                     if call.output_tokens is not None:
                         grand_output_tokens += call.output_tokens
                     if call.total_tokens is not None:
-                        grand_total_tokens  += call.total_tokens
+                        grand_total_tokens += call.total_tokens
             else:
                 print("  (no API calls recorded)")
 

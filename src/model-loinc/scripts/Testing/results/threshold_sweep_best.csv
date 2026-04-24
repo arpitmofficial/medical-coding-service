@@ -1,0 +1,2 @@
+config_name,dense_threshold,sparse_threshold,rrf_threshold,min_score,fusion_alpha,fusion_beta,fusion_gamma,metadata_weight,qdrant_top_k,use_dual_threshold,evaluated_cases,pass_count,pass_pct,avg_pool_size,median_pool_size,p90_pool_size,avg_first_match_rank
+high_recall_large_pool,0.05,0.25,0.0,0.05,0.5,0.4,0.1,0.55,60,True,63,56,88.89,191.1,143.0,234.6,14.43

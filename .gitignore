@@ -6,9 +6,18 @@
 # --- Python ---
 __pycache__/
 *.py[cod]
+*.log
 venv/
+
+# Runtime log folders under src
+src/**/logs/
 
 # --- OS Specific ---
 .DS_Store
 Thumbs.db
 .env
+
+*.~lock*
+
+.vscode/
+.ruff_cache/

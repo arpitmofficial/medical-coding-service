@@ -1,0 +1,11 @@
+config_name,dense_threshold,sparse_threshold,rrf_threshold,min_score,fusion_alpha,fusion_beta,fusion_gamma,metadata_weight,qdrant_top_k,use_dual_threshold,evaluated_cases,pass_count,pass_pct,avg_pool_size,median_pool_size,p90_pool_size,avg_first_match_rank
+high_recall_large_pool,0.05,0.25,0.0,0.05,0.5,0.4,0.1,0.55,60,True,63,56,88.89,191.1,143.0,234.6,14.43
+sparse_lean,0.1,1.5,0.0,0.2,0.45,0.45,0.1,0.5,50,True,63,54,85.71,83.95,60.0,113.6,12.81
+balanced_low_threshold,0.1,0.5,0.0,0.1,0.55,0.35,0.1,0.5,50,True,63,54,85.71,119.73,89.0,153.0,12.06
+baseline_dual_relaxed,0.0,0.0,0.0,0.0,0.55,0.35,0.1,0.5,50,True,63,54,85.71,162.06,115.0,200.8,12.06
+balanced_mid_threshold,0.2,1.0,0.0,0.2,0.55,0.35,0.1,0.5,50,True,63,53,84.13,79.59,59.0,118.4,10.53
+rrf_guardrail,0.1,1.0,0.01,0.2,0.5,0.3,0.2,0.5,50,True,63,53,84.13,79.86,60.0,112.2,10.26
+dense_lean,0.2,0.5,0.0,0.2,0.65,0.25,0.1,0.45,50,True,63,52,82.54,72.83,57.0,92.2,9.85
+weighted_only_no_dual_gate,0.0,0.0,0.0,0.25,0.55,0.35,0.1,0.5,50,False,63,49,77.78,61.52,48.0,86.4,8.31
+strict_pool_control,0.25,2.0,0.0,0.3,0.6,0.3,0.1,0.4,50,True,63,47,74.6,47.48,39.0,69.6,6.89
+strict_compact_pool,0.3,2.5,0.01,0.35,0.65,0.2,0.15,0.35,40,True,63,44,69.84,34.51,28.0,44.0,6.43

@@ -1,302 +1,108 @@
 # Medical Coding Service
 
-A FastAPI-based medical coding system that retrieves standardized medical codes (ICD-10, CPT, LOINC) from clinical notes using hybrid search with LLM-powered entity extraction and re-ranking.
+Hybrid clinical coding service that predicts ICD-10, CPT, and LOINC codes from free-text clinical notes.
 
-## Table of Contents
+This repository contains:
+- A FastAPI gateway in src/api.py
+- Three model pipelines under src/model-icd-10, src/model-cpt, and src/model-loinc
+- Ingestion and evaluation scripts for each model
 
-- [Overview](#overview)
-- [System Requirements](#system-requirements)
-- [Environment Variables](#environment-variables)
-- [Installation](#installation)
-- [Running the API](#running-the-api)
-- [API Documentation & Testing](#api-documentation--testing)
-- [API Endpoints](#api-endpoints)
-- [Example Usage](#example-usage)
+## API Documentation
 
----
+Detailed endpoint documentation is available here:
 
-## Overview
+- [API Documentation](api-documentation.md)
 
-The Medical Coding Service is a shared gateway that:
-- Sits above individual model directories (model-icd-10, model-cpt, model-loinc, etc.)
-- Provides a single HTTP interface for doctors to submit clinical diagnoses
-- Returns standardized medical codes with confidence scores and clinical explanations
+When running the API locally, you can also use:
 
-**Current Features:**
-- ✅ ICD-10 medical code retrieval
-- 🔄 CPT and LOINC endpoints (future implementation)
+- http://localhost:8000/docs
+- http://localhost:8000/redoc
 
----
+## Model Documentation
 
-## System Requirements
+- [ICD-10 Model](src/model-icd-10/README.md)
+- [CPT Model](src/model-cpt/README.md)
+- [LOINC Model](src/model-loinc/README.md)
 
-- **Python 3.9+**
-- **pip** or **conda** (Python package manager)
-- API keys for external services (see [Environment Variables](#environment-variables))
-- Qdrant vector database instance (running or accessible via URL)
+## Repository Layout
 
----
+```text
+.
+├── README.md
+├── api-documentation.md
+└── src
+    ├── api.py
+    ├── requirements.txt
+    ├── model-icd-10
+    ├── model-cpt
+    └── model-loinc
+```
 
-## Environment Variables
+## Prerequisites
 
-Create a `.env` file in the `src/` directory with the following variables:
+- Python 3.10+
+- Access to a Qdrant instance
+- Valid API keys for embedding and LLM providers
 
-### **Required Variables**
+## Environment Setup
 
-```bash
-# API Authentication
-API_KEY=your_secret_api_key_here
+Create src/.env with at least:
 
-# Qdrant Vector Database
-QDRANT_URL=http://localhost:6333          # Qdrant instance URL
+```env
+API_KEY=your_api_key
+
+QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=your_qdrant_api_key
 
-# Embeddings API
 JINA_API_KEY=your_jina_api_key
-
-# LLM Configuration (OpenAI-compatible)
-LLM_API_KEY=your_llm_api_key              # e.g., OpenAI or compatible service
-LLM_MODEL=gpt-4o-mini                     # LLM model name (default: gpt-4o-mini)
-```
-
-### **Optional Variables** (Pipeline Tuning)
-
-```bash
-# Pipeline Configuration
-QDRANT_TOP_K=50                           # Candidates per entity (default: 50)
-FINAL_TOP_N=5                             # Codes returned to caller (default: 5)
-MIN_SCORE=0.0                             # Score cutoff threshold (default: 0.0, no filter)
-```
-
-### **Example `.env` File**
-
-```bash
-cat > src/.env << 'EOF'
-API_KEY=medical-api-key-12345
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=qdrant-key-xyz
-JINA_API_KEY=jina-embedding-key
-LLM_API_KEY=sk-your-openai-key
+LLM_API_KEY=your_llm_api_key
 LLM_MODEL=gpt-4o-mini
+# other llm models that can be used are gemini-1.5-flash and llama-3.1-8b-instant
+# for llama model generate groq api key
+
 QDRANT_TOP_K=50
 FINAL_TOP_N=5
 MIN_SCORE=0.0
-EOF
 ```
-
----
 
 ## Installation
 
-### 1. **Clone or Navigate to Project**
-
 ```bash
-cd /path/to/medical-coding-service
-```
-
-### 2. **Create a Virtual Environment** (Recommended)
-
-```bash
-# Using venv
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Or using conda
-conda create -n medical-coding python=3.9
-conda activate medical-coding
-```
-
-### 3. **Install Dependencies**
-
-```bash
-cd src/
-
-# Install main API dependencies
+cd src
 pip install -r requirements.txt
-
-# Install model-specific dependencies (ICD-10)
-pip install -r model-icd-10/requirements.txt
 ```
 
-### 4. **Verify Installation**
+## Run the API
 
 ```bash
-python -c "import fastapi; import uvicorn; print('✅ All dependencies installed')"
-```
-
----
-
-## Running the API
-
-### **Start the API Server**
-
-From the `src/` directory:
-
-```bash
-cd src/
+cd src
 uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Command Breakdown:**
-- `uvicorn api:app` — Run the FastAPI app from `api.py`
-- `--host 0.0.0.0` — Accept connections from any IP
-- `--port 8000` — Listen on port 8000 (change as needed)
-- `--reload` — Auto-reload on code changes (use only in development)
-
-### **Server Output**
-
-```
-INFO:     Uvicorn running on http://0.0.0.0:8000
-INFO:     Application startup complete
-INFO:     Registering models …
-INFO:     ICD-10 model registered
-```
-
-The API is now running and ready to receive requests!
-
-### **Optional: Custom Port**
+## Smoke Test
 
 ```bash
-uvicorn api:app --host 0.0.0.0 --port 5000
+curl -X POST "http://localhost:8000/predict" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"clinical_notes":"Type 2 diabetes with neuropathy and foot ulcer"}'
 ```
 
-Access API at: `http://localhost:5000`
+## Current Pipeline Notes
 
----
+- ICD-10: hybrid retrieval and reranking enabled.
+- CPT: hybrid retrieval and reranking enabled.
+- LOINC: retrieval pipeline active; reranking module exists but is currently disabled in the active orchestration path.
 
-## API Documentation & Testing
+## Evaluation Scripts
 
-### **Interactive API Documentation (Swagger UI)**
+Representative scripts:
 
-Once the server is running, visit:
+- src/model-icd-10/scripts/query_test.py
+- src/model-cpt/scripts/query_test.py
+- src/model-loinc/scripts/query_test.py
 
-```
-http://localhost:8000/docs
-```
-
-This provides:
-- ✅ Interactive API exploration
-- ✅ Live request/response testing
-- ✅ Automatic schema validation
-- ✅ Beautiful web interface
-
-### **Alternative: ReDoc**
-
-```
-http://localhost:8000/redoc
-```
-
-Provides detailed API documentation in a different format.
-
----
-
-## API Endpoints
-
-### **1. Health Check**
-
-**Endpoint:** `GET /health`
-
-**Description:** Check API status and available models
-
-**No Authentication Required**
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "models": ["icd10"]
-}
-```
-
-**Example using cURL:**
-```bash
-curl http://localhost:8000/health
-```
-
----
-
-### **2. Predict (All Models)**
-
-**Endpoint:** `POST /predict`
-
-**Description:** Run all registered models on clinical notes
-
-**Authentication Required:** `Authorization: Bearer <API_KEY>`
-
-**Request Body:**
-```json
-{
-  "clinical_notes": "Patient presents with acute chest pain radiating to left arm"
-}
-```
-
-**Response:**
-```json
-{
-  "clinical_notes": "Patient presents with acute chest pain radiating to left arm",
-  "results": [
-    {
-      "model": "icd10",
-      "codes": [
-        {
-          "code": "I21.9",
-          "description": "Acute myocardial infarction, unspecified",
-          "confidence": 95,
-          "explanation": "Acute chest pain with radiation pattern consistent with MI"
-        }
-      ],
-      "error": null,
-      "elapsed_seconds": 2.345
-    }
-  ],
-  "total_elapsed_seconds": 2.345
-}
-```
-
----
-
-### **3. Predict ICD-10 (Specific Model)**
-
-**Endpoint:** `POST /predict/icd10`
-
-**Description:** Run only the ICD-10 model pipeline
-
-**Authentication Required:** `Authorization: Bearer <API_KEY>`
-
-**Request Body:**
-```json
-{
-  "clinical_notes": "Patient presents with acute chest pain radiating to left arm"
-}
-```
-
-**Response Format:** Same as `/predict` endpoint
-
----
-
-## Example Usage
-
-### **Using FastAPI Swagger UI (Browser)**
-
-1. **Start the server:**
-   ```bash
-   cd src/
-   uvicorn api:app --host 0.0.0.0 --port 8000 --reload
-   ```
-
-2. **Open browser:**
-   ```
-   http://localhost:8000/docs
-   ```
-
-3. **Test endpoint:**
-   - Click on `POST /predict`
-   - Click **Try it out**
-   - Add your API key in the Authorization field
-   - Enter clinical notes in the request body
-   - Click **Execute**
-
-### **Using cURL (Command Line)**
+Model-specific evaluation and ingestion details are documented in each model README.
 
 ```bash
 # Test health endpoint (no auth needed)

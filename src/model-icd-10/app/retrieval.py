@@ -88,7 +88,11 @@ async def retrieve_icd_candidates(
     # This captures combined semantic meaning that individual entities might miss
     # e.g., "heart attack with chest pain" might match "myocardial infarction with chest pain"
     search_queries = [raw_text.strip()] + entities
-    logger.info("Search queries: original query + %d entities = %d total", len(entities), len(search_queries))
+    logger.info(
+        "Search queries: original query + %d entities = %d total",
+        len(entities),
+        len(search_queries),
+    )
 
     # Embed in a single batched call (one round-trip to Jina)
     logger.info("Embedding %d search queries …", len(search_queries))
@@ -105,11 +109,10 @@ async def retrieve_icd_candidates(
     logger.info("Searching Qdrant (top_k=%d) for each entity …", qdrant_top_k)
     tracker.start_module("qdrant_rest.py")
     try:
-        qdrant_tasks = [
-            search_vectors(vec, limit=qdrant_top_k)
-            for vec in vectors
-        ]
-        per_entity_results: list[list[dict[str, Any]]] = await asyncio.gather(*qdrant_tasks)
+        qdrant_tasks = [search_vectors(vec, limit=qdrant_top_k) for vec in vectors]
+        per_entity_results: list[list[dict[str, Any]]] = await asyncio.gather(
+            *qdrant_tasks
+        )
     except RuntimeError as exc:
         tracker.end_module("qdrant_rest.py")
         logger.error("Qdrant search stage failed: %s", exc)
@@ -140,7 +143,9 @@ async def retrieve_icd_candidates(
     )
 
     if not candidates:
-        logger.warning("No candidates above min_score=%.2f; returning empty list.", min_score)
+        logger.warning(
+            "No candidates above min_score=%.2f; returning empty list.", min_score
+        )
         return []
 
     # ------------------------------------------------------------------

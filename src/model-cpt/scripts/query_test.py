@@ -21,20 +21,20 @@ sys.path.insert(0, str(MODEL_CPT_DIR / "app"))
 # Import CPT retrieval module
 from adaptive_retrieval_cpt import adaptive_retrieve_cpt_candidates
 
-print("🏥 CPT Medical Procedure Coding Service")
+print("CPT Medical Procedure Coding Service")
 print("=" * 40)
 
 
 async def main() -> None:
     while True:
-        query = input("\n📝 Enter procedure description (or 'quit' to exit): ").strip()
+        query = input("\nEnter procedure description (or 'quit' to exit): ").strip()
         if query.lower() in {"quit", "exit", "q"}:
             break
         if not query:
             continue
 
         print()  # Clean spacing
-        
+
         tracker.reset()
         tracker.pipeline_start = time.perf_counter()
         try:
@@ -48,11 +48,11 @@ async def main() -> None:
         tracker.pipeline_end = time.perf_counter()
 
         if not results:
-            print("❌ No results found above the minimum confidence threshold.")
+            print("No results found above the minimum confidence threshold.")
             tracker.print_report()
             continue
 
-        print(f"\n📋 Top {len(results)} CPT code(s):")
+        print(f"\nTop {len(results)} CPT code(s):")
         print("-" * 60)
         for i, r in enumerate(results, start=1):
             print(

@@ -1,0 +1,2 @@
+total_queries,top5_hits,top5_pct,rank1_hits,rank1_pct,failed_cases,failed_pct,avg_time_seconds,median_time_seconds,avg_tokens_used,median_tokens_used
+212,97,45.75,54,25.47,115,54.25,24.318,23.536,2565.61,2398.5

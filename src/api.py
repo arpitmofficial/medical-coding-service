@@ -51,6 +51,7 @@ load_dotenv(os.path.join(_src_dir, ".env"))
 # we add individual model directories to sys.path on demand.
 _MODEL_ICD10_DIR = os.path.join(_src_dir, "model-icd-10")
 _MODEL_CPT_DIR = os.path.join(_src_dir, "model-cpt")
+_MODEL_LOINC_DIR = os.path.join(_src_dir, "model-loinc")
 
 API_KEY = os.getenv("API_KEY", "")
 
@@ -60,8 +61,10 @@ logger = logging.getLogger(__name__)
 # Request / response schemas
 # ---------------------------------------------------------------------------
 
+
 class PredictRequest(BaseModel):
     """Payload sent by the doctor / client system."""
+
     clinical_notes: str = Field(
         ...,
         min_length=1,
@@ -132,7 +135,9 @@ def _register_icd10() -> None:
         sys.path.insert(0, _MODEL_ICD10_DIR)
     # Now we can import the pipeline entry point
     from app.adaptive_retrieval import adaptive_retrieve_icd_candidates  # noqa: E402
+
     _model_registry["icd10"] = adaptive_retrieve_icd_candidates
+
 
 def _register_cpt() -> None:
     """Lazily import and register the CPT model."""
@@ -140,13 +145,30 @@ def _register_cpt() -> None:
         return
     if _MODEL_CPT_DIR not in sys.path:
         sys.path.insert(0, _MODEL_CPT_DIR)
-    from app.adaptive_retrieval_cpt import adaptive_retrieve_cpt_candidates  # noqa: E402
+    from app.adaptive_retrieval_cpt import (
+        adaptive_retrieve_cpt_candidates,
+    )  # noqa: E402
+
     _model_registry["cpt"] = adaptive_retrieve_cpt_candidates
+
+
+def _register_loinc() -> None:
+    """Lazily import and register the LOINC model."""
+    if "loinc" in _model_registry:
+        return
+    if _MODEL_LOINC_DIR not in sys.path:
+        sys.path.insert(0, _MODEL_LOINC_DIR)
+    from app.adaptive_retrieval_loinc import (
+        adaptive_retrieve_loinc_candidates,
+    )  # noqa: E402
+
+    _model_registry["loinc"] = adaptive_retrieve_loinc_candidates
 
 
 # ---------------------------------------------------------------------------
 # Lifespan: register models at startup
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -157,14 +179,18 @@ async def lifespan(application: FastAPI):
         logger.info("ICD-10 model registered")
     except Exception as exc:
         logger.error("Failed to register ICD-10 model: %s", exc)
-        
+
     try:
         _register_cpt()
         logger.info("CPT model registered")
     except Exception as exc:
         logger.error("Failed to register CPT model: %s", exc)
-    # Future models go here:
-    # _register_loinc()
+
+    try:
+        _register_loinc()
+        logger.info("LOINC model registered")
+    except Exception as exc:
+        logger.error("Failed to register LOINC model: %s", exc)
     yield
     logger.info("Shutting down API")
 
@@ -187,6 +213,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health():
@@ -221,7 +248,9 @@ async def _run_model(model_name: str, clinical_notes: str) -> ModelResult:
             )
             for r in raw
         ]
-        return ModelResult(model=model_name, codes=codes, elapsed_seconds=round(elapsed, 3))
+        return ModelResult(
+            model=model_name, codes=codes, elapsed_seconds=round(elapsed, 3)
+        )
     except Exception as exc:
         elapsed = time.perf_counter() - t0
         logger.exception("Model %s failed", model_name)
@@ -240,7 +269,7 @@ async def predict_all(
 ):
     """
     Run **all** registered models on the clinical notes and return combined
-    results. Currently runs ICD-10; CPT and LOINC will be added later.
+    results.
     """
     t0 = time.perf_counter()
     model_results: list[ModelResult] = []
@@ -275,6 +304,7 @@ async def predict_icd10(
 
 # Future endpoints — uncomment when models are ready
 
+
 @app.post("/predict/cpt", response_model=PredictResponse, tags=["Prediction"])
 async def predict_cpt(body: PredictRequest, _key: str = Depends(verify_api_key)):
     """Run only the CPT model."""
@@ -287,13 +317,15 @@ async def predict_cpt(body: PredictRequest, _key: str = Depends(verify_api_key))
         total_elapsed_seconds=round(total, 3),
     )
 
-# @app.post("/predict/loinc", response_model=PredictResponse, tags=["Prediction"])
-# async def predict_loinc(body: PredictRequest, _key: str = Depends(verify_api_key)):
-#     t0 = time.perf_counter()
-#     result = await _run_model("loinc", body.clinical_notes)
-#     total = time.perf_counter() - t0
-#     return PredictResponse(
-#         clinical_notes=body.clinical_notes,
-#         results=[result],
-#         total_elapsed_seconds=round(total, 3),
-#     )
+
+@app.post("/predict/loinc", response_model=PredictResponse, tags=["Prediction"])
+async def predict_loinc(body: PredictRequest, _key: str = Depends(verify_api_key)):
+    """Run only the LOINC model."""
+    t0 = time.perf_counter()
+    result = await _run_model("loinc", body.clinical_notes)
+    total = time.perf_counter() - t0
+    return PredictResponse(
+        clinical_notes=body.clinical_notes,
+        results=[result],
+        total_elapsed_seconds=round(total, 3),
+    )

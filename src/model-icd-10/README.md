@@ -1,403 +1,76 @@
-# ICD-10 Hybrid Search & Retrieval System
+# ICD-10 Model
 
-A production-ready medical coding system that retrieves ICD-10 codes using **hybrid search** (semantic + keyword) with LLM-powered entity extraction and re-ranking.
+ICD-10 retrieval pipeline used by the medical coding API.
 
----
+## What It Does
 
-## Table of Contents
+Given free-text clinical notes, this model:
 
-1. [System Architecture](#system-architecture)
-2. [Pipeline Flow](#pipeline-flow)
-3. [Configuration Values](#configuration-values)
-4. [Search Splits & Fusion](#search-splits--fusion)
-5. [Component Details](#component-details)
-6. [Quick Start](#quick-start)
-7. [Example Output](#example-output)
-8. [Troubleshooting](#troubleshooting)
+1. Extracts structured medical entities from text.
+2. Runs hybrid retrieval against Qdrant (dense + sparse).
+3. Fuses candidates with rank-based scoring.
+4. Applies LLM reranking.
+5. Returns final ICD-10 candidates with confidence and explanation.
 
----
+## Main Files
 
-## System Architecture
+- app/adaptive_retrieval.py: Orchestration entrypoint.
+- app/preprocessing.py: Clinical entity extraction.
+- app/embedding.py: Dense and sparse embedding generation.
+- app/qdrant_rest.py: Qdrant search helpers.
+- app/reranking.py: Final LLM reranking.
+- scripts/query_test.py: Interactive local query script.
+- scripts/ingest.py: Ingestion utility for ICD-10 data.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        ICD-10 HYBRID RETRIEVAL PIPELINE                     │
-└─────────────────────────────────────────────────────────────────────────────┘
+## Expected Environment Variables
 
-     USER INPUT                    STAGE 0                     STAGE 1
-  ┌─────────────┐            ┌─────────────────┐         ┌─────────────────┐
-  │ "patient    │            │  LLM ENTITY     │         │  DUAL EMBEDDING │
-  │  had a      │ ────────▶  │  EXTRACTION     │ ──────▶ │                 │
-  │  heart      │            │  (Gemini)       │         │ Dense + Sparse  │
-  │  attack"    │            └─────────────────┘         └─────────────────┘
-  └─────────────┘                    │                          │
-                                     ▼                          ▼
-                          "acute myocardial           ┌─────────────────────┐
-                           infarction"                │ Jina (768D) Vector  │
-                                                      │ BM25 Sparse Vector  │
-                                                      └─────────────────────┘
-                                                               │
-                              ┌─────────────────────────────────┘
-                              ▼
-                    STAGE 2: QDRANT HYBRID SEARCH
-     ┌────────────────────────────────────────────────────────────────┐
-     │                                                                │
-     │  ┌──────────────────┐         ┌──────────────────┐            │
-     │  │  DENSE SEARCH    │         │  SPARSE SEARCH   │            │
-     │  │  (Semantic)      │         │  (Keyword/BM25)  │            │
-     │  │                  │         │                  │            │
-     │  │  Top 30 results  │         │  Top 20 results  │            │
-     │  │  Cosine distance │         │  BM25 scoring    │            │
-     │  └────────┬─────────┘         └────────┬─────────┘            │
-     │           │                            │                       │
-     │           └──────────┬─────────────────┘                       │
-     │                      ▼                                         │
-     │           ┌──────────────────────┐                             │
-     │           │    RRF FUSION        │                             │
-     │           │  (Reciprocal Rank)   │                             │
-     │           │                      │                             │
-     │           │  Top 50 combined     │                             │
-     │           └──────────────────────┘                             │
-     │                                                                │
-     └────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    STAGE 3: MERGE & DEDUPLICATE
-     ┌────────────────────────────────────────────────────────────────┐
-     │  • Remove duplicate codes (keep highest score)                 │
-     │  • Filter by MIN_SCORE threshold (default: 0.0 = no filter)    │
-     │  • Sort by RRF score descending                                │
-     └────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    STAGE 4: LLM RE-RANKING
-     ┌────────────────────────────────────────────────────────────────┐
-     │                      GEMINI LLM                                │
-     │                                                                │
-     │  Inputs:                                                       │
-     │  • Original user input: "patient had a heart attack"           │
-     │  • Extracted entity: "acute myocardial infarction"             │
-     │  • All hybrid candidates with similarity scores                │
-     │                                                                │
-     │  Output:                                                       │
-     │  • Exactly 5 codes with confidence scores (0-100%)             │
-     │  • Clinical explanation for each code                          │
-     └────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                        FINAL OUTPUT
-     ┌────────────────────────────────────────────────────────────────┐
-     │  [                                                             │
-     │    {"code": "I21.9", "description": "...", "confidence": 95},  │
-     │    {"code": "I23.8", "description": "...", "confidence": 65},  │
-     │    {"code": "I21.A1", "description": "...", "confidence": 45}, │
-     │    {"code": "I21.01", "description": "...", "confidence": 45}, │
-     │    {"code": "I25.2", "description": "...", "confidence": 35}   │
-     │  ]                                                             │
-     └────────────────────────────────────────────────────────────────┘
-```
+Configured via src/.env:
 
----
+- QDRANT_URL
+- QDRANT_API_KEY
+- JINA_API_KEY
+- LLM_API_KEY
+- LLM_MODEL
+- QDRANT_TOP_K (optional)
+- FINAL_TOP_N (optional)
+- MIN_SCORE (optional)
 
-## Pipeline Flow
+## Run Local Query Test
 
-### Stage 0: LLM Entity Extraction
-**File**: `app/preprocessing.py`
-
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Convert colloquial/layman terms to standard medical terminology |
-| **LLM** | Gemini 2.5-flash (or OpenAI-compatible) |
-| **Temperature** | 0 (deterministic) |
-| **Output** | JSON array of medical entities |
-
-**Term Normalization Examples**:
-| User Input | Extracted Entity |
-|------------|------------------|
-| "heart attack" | "acute myocardial infarction" |
-| "stroke" | "cerebrovascular accident" |
-| "high blood pressure" | "hypertension" |
-| "sugar disease" | "diabetes mellitus" |
-| "broken bone" | "fracture" |
-
----
-
-### Stage 1: Dual Embedding Generation
-**File**: `app/embedding.py`
-
-| Embedding Type | Model | Dimensions | Purpose |
-|----------------|-------|------------|---------|
-| **Dense** | Jina v2-base-en | 768 | Semantic similarity (understands meaning) |
-| **Sparse** | Qdrant/BM25 (FastEmbed) | Variable (sparse) | Keyword matching (exact terms, acronyms) |
-
-**Why Two Embeddings?**
-- **Dense only**: Great at "heart attack" → "myocardial infarction" but misses "T2DM" → "Type 2 Diabetes"
-- **Sparse only**: Great at acronyms but misses semantic relationships
-- **Combined**: Best of both worlds
-
----
-
-### Stage 2: Qdrant Hybrid Search
-**File**: `app/qdrant_rest.py`
-
-#### Search Limits (Hardcoded Constants)
-
-| Search Type | Limit | Constant Name |
-|-------------|-------|---------------|
-| **Dense (Semantic)** | 30 | `DENSE_SEARCH_LIMIT` |
-| **Sparse (BM25/Keyword)** | 20 | `SPARSE_SEARCH_LIMIT` |
-| **Hybrid (RRF Combined)** | 50 | `HYBRID_RESULT_LIMIT` |
-
-#### Vector Configuration in Qdrant
-
-```python
-{
-  "vectors": {
-    "dense": {
-      "size": 768,           # Jina embedding dimensions
-      "distance": "Cosine"   # Similarity metric (0-1 score)
-    },
-    "sparse": {
-      "type": "sparse"       # BM25 sparse vectors
-    }
-  }
-}
-```
-
-#### Reciprocal Rank Fusion (RRF)
-
-The RRF algorithm combines results from dense and sparse searches:
-
-```
-RRF_score(d) = Σ 1 / (k + rank(d))
-```
-
-Where:
-- `k` = 60 (Qdrant default constant)
-- `rank(d)` = position of document d in each result list
-- Higher RRF score = appears highly ranked in both/multiple searches
-
-**Example**:
-| Code | Dense Rank | Sparse Rank | RRF Calculation | RRF Score |
-|------|------------|-------------|-----------------|-----------|
-| I21.9 | 1 | 1 | 1/(60+1) + 1/(60+1) | 0.0328 |
-| I23.8 | 4 | 2 | 1/(60+4) + 1/(60+2) | 0.0317 |
-| I25.2 | 2 | 12 | 1/(60+2) + 1/(60+12) | 0.0300 |
-
-*Note: Qdrant normalizes RRF scores to 0-1 range where 1.0 = top match*
-
----
-
-### Stage 3: Merge & Deduplicate
-**File**: `app/adaptive_retrieval.py`
-
-| Operation | Detail |
-|-----------|--------|
-| **Deduplication** | If same ICD code appears multiple times, keep highest score |
-| **Score Filtering** | Remove codes below `MIN_SCORE` threshold |
-| **Sorting** | Order by RRF score descending |
-
----
-
-### Stage 4: LLM Re-ranking
-**File**: `app/reranking.py`
-
-| Aspect | Detail |
-|--------|--------|
-| **LLM** | Gemini 2.5-flash |
-| **Input** | Original user text + Extracted entity + All candidates |
-| **Output** | Exactly 5 codes with confidence scores |
-
-**Confidence Score Guidelines**:
-| Range | Meaning |
-|-------|---------|
-| 90-100% | Perfect semantic match with clinical text |
-| 75-89% | Strong match, highly appropriate code |
-| 60-74% | Good match, reasonable code choice |
-| 40-59% | Moderate match, possible but not ideal |
-| <40% | Weak match, only if no better options |
-
----
-
-## Configuration Values
-
-### Environment Variables (`.env`)
-
-```env
-# API Keys
-JINA_API_KEY=your_jina_api_key
-QDRANT_URL=https://your-cluster.qdrant.tech
-QDRANT_API_KEY=your_qdrant_api_key
-LLM_API_KEY=your_gemini_or_openai_key
-LLM_MODEL=gemini-2.5-flash
-
-# Pipeline Configuration
-QDRANT_TOP_K=50      # Max candidates per entity (before fusion)
-FINAL_TOP_N=5        # Final codes returned (strict top 5)
-MIN_SCORE=0.0        # Score cutoff (0.0 = no cutoff)
-```
-
-### Hardcoded Constants
-
-| Constant | Location | Value | Purpose |
-|----------|----------|-------|---------|
-| `DENSE_SEARCH_LIMIT` | `qdrant_rest.py` | 30 | Dense search results before fusion |
-| `SPARSE_SEARCH_LIMIT` | `qdrant_rest.py` | 20 | Sparse search results before fusion |
-| `HYBRID_RESULT_LIMIT` | `qdrant_rest.py` | 50 | Max results after RRF fusion |
-| `_JINA_MODEL` | `embedding.py` | "jina-embeddings-v2-base-en" | Dense embedding model |
-| Sparse Model | `embedding.py` | "Qdrant/bm25" | BM25 sparse embedding |
-
----
-
-## Search Splits & Fusion
-
-### Why 30/20/50 Split?
-
-| Ratio | Reasoning |
-|-------|-----------|
-| **Dense: 30** | Larger pool for semantic matches (catches synonyms, related concepts) |
-| **Sparse: 20** | Focused keyword matches (acronyms, exact terms) |
-| **Total: 50** | RRF combines both, but overlapping codes boost each other's rank |
-
-### How RRF Fusion Works
-
-1. **Execute both searches independently**:
-   - Dense search returns top 30 codes (semantic similarity)
-   - Sparse search returns top 20 codes (keyword matching)
-
-2. **Calculate RRF score for each code**:
-   - Codes appearing in **both** lists get higher combined scores
-   - A code ranked #1 in dense and #1 in sparse = highest possible score
-   - A code ranked #30 in dense only = very low score
-
-3. **Return top 50 by RRF score**:
-   - Usually fewer than 50 unique codes (due to overlap)
-   - Example: 30 + 20 searches might yield ~33 unique codes
-
-### Score Ranges
-
-| Search Type | Score Range | Interpretation |
-|-------------|-------------|----------------|
-| **Dense (Cosine)** | 0.0 - 1.0 | 1.0 = identical, 0.7+ = strong match |
-| **Sparse (BM25)** | 0.0 - ∞ | Unbounded positive, higher = better keyword match |
-| **RRF (Normalized)** | 0.0 - 1.0 | 1.0 = top combined rank, drops quickly |
-
----
-
-## Component Details
-
-### File Structure
-
-```
-src/
-├── app/
-│   ├── __init__.py
-│   ├── config.py              # Environment loading, logging setup
-│   ├── embedding.py           # Jina dense + BM25 sparse embeddings
-│   ├── preprocessing.py       # LLM entity extraction
-│   ├── qdrant_rest.py         # Qdrant REST API calls, hybrid search
-│   ├── reranking.py           # LLM re-ranking with confidence scores
-│   ├── retrieval.py           # Legacy retrieval (if present)
-│   └── adaptive_retrieval.py  # Main pipeline orchestration
-├── scripts/
-│   └── query_test.py          # Test script
-├── logs/
-│   └── medical_coding.log     # Detailed debug logs
-├── .env                       # Environment configuration
-└── requirements.txt           # Python dependencies
-```
-
-### Key Functions
-
-| Function | File | Purpose |
-|----------|------|---------|
-| `parse_entities()` | `preprocessing.py` | LLM extracts medical entities from raw text |
-| `get_embeddings_batch()` | `embedding.py` | Generate Jina dense vectors |
-| `get_sparse_embeddings_batch()` | `embedding.py` | Generate BM25 sparse vectors |
-| `search_vectors_debug()` | `qdrant_rest.py` | Execute hybrid search with debug output |
-| `rerank_codes()` | `reranking.py` | LLM re-rank candidates to top 5 |
-| `adaptive_retrieve_icd_candidates()` | `adaptive_retrieval.py` | Full pipeline orchestration |
-
----
-
-## Quick Start
-
-### 1. Install Dependencies
+From repository root:
 
 ```bash
-cd src
-pip install -r requirements.txt
+cd src/model-icd-10/scripts
+python query_test.py
 ```
 
-### 2. Configure Environment
+## Ingest / Rebuild Index
 
-Create `.env` file in `src/` directory:
-
-```env
-JINA_API_KEY=your_jina_key
-QDRANT_URL=https://your-cluster.qdrant.tech
-QDRANT_API_KEY=your_qdrant_key
-LLM_API_KEY=your_gemini_key
-LLM_MODEL=gemini-2.5-flash
-QDRANT_TOP_K=50
-FINAL_TOP_N=5
-MIN_SCORE=0.0
-```
-
-### 3. Test the System
+From repository root:
 
 ```bash
-python scripts/query_test.py
+cd src/model-icd-10/scripts
+python ingest.py
 ```
 
-Or run directly:
+## Evaluation
 
-```python
-import asyncio
-from app.adaptive_retrieval import adaptive_retrieve_icd_candidates
+Evaluation scripts and outputs are under:
 
-async def main():
-    results = await adaptive_retrieve_icd_candidates("patient had a heart attack")
-    for r in results:
-        print(f"{r['code']}: {r['description']} ({r['confidence']}%)")
+- scripts/Testing
 
-asyncio.run(main())
-```
+Use this to run reproducible checks on retrieval quality after tuning or data updates.
 
----
+## API Integration
 
-## Example Output
+This model is exposed through the API endpoints:
 
-### Terminal Output (Debug Mode)
+- POST /predict
+- POST /predict/icd10
 
-```
-🔍 Processing: 'patient had a heart attack'
-🔍 🧠 LLM Entity Extraction: ['acute myocardial infarction']
-🔍 Hybrid Search ENABLED (✨ Dense + Sparse vectors with RRF fusion)
+See the root API docs here:
 
-📊 Searching for entity: 'acute myocardial infarction'
-
-============================================================
-🔵 DENSE (SEMANTIC) SEARCH RESULTS (top 30):
-============================================================
-   1. [I21.9] Acute myocardial infarction, unspecified (score: 0.9228)
-   2. [I25.2] Old myocardial infarction (score: 0.8776)
-   3. [I21.A1] Myocardial infarction type 2 (score: 0.8715)
-   ... (27 more)
-
-============================================================
-🟡 SPARSE (KEYWORD/BM25) SEARCH RESULTS (top 20):
-============================================================
-   1. [I21.9] Acute myocardial infarction, unspecified (score: 8.4314)
-   2. [I23.8] Other current complications following AMI (score: 8.3865)
-   3. [I24.0] Acute coronary thrombosis not resulting in MI (score: 8.3865)
-   ... (17 more)
-
-============================================================
-🟢 HYBRID (RRF FUSION) SEARCH RESULTS (top 50):
-============================================================
-   1. [I21.9] Acute myocardial infarction, unspecified (score: 1.0000)
-   2. [I23.8] Other current complications following AMI (score: 0.5333)
+- ../../api-documentation.md
    3. [I25.2] Old myocardial infarction (score: 0.4103)
    ... (30 more)
 

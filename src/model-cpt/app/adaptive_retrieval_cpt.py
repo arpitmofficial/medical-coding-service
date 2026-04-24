@@ -16,6 +16,7 @@ Usage:
 """
 
 import asyncio
+import importlib
 import logging
 import sys
 import time
@@ -24,32 +25,18 @@ from typing import Any, Optional
 
 import httpx
 
-# Resolve paths
-MODEL_CPT_DIR = Path(__file__).resolve().parent.parent
-MODEL_ICD10_DIR = MODEL_CPT_DIR.parent / "model-icd-10"
-
-# Temporarily add ICD-10 to path to load shared modules
-_original_path = sys.path.copy()
-sys.path.insert(0, str(MODEL_ICD10_DIR))
-
-# Import from ICD-10 shared modules
+from app.preprocessing import parse_entities as parse_cpt_entities
+from app.reranking import rerank_codes as rerank_cpt_codes
 from app.config import FINAL_TOP_N, MIN_SCORE, QDRANT_TOP_K, console_logger
 from app.embedding import get_embeddings_batch, get_sparse_embeddings_batch
 from app.execution_analysis import tracker
 from app.qdrant_rest import (
     QDRANT_URL, 
-    QDRANT_HEADERS,
-    DENSE_SEARCH_LIMIT,
-    SPARSE_SEARCH_LIMIT,
-    HYBRID_RESULT_LIMIT,
+    QDRANT_HEADERS, 
+    DENSE_SEARCH_LIMIT, 
+    SPARSE_SEARCH_LIMIT, 
+    HYBRID_RESULT_LIMIT
 )
-
-# Restore original path
-sys.path = _original_path
-
-# Import CPT-specific modules (local, with modified prompts)
-from app.preprocessing import parse_entities as parse_cpt_entities
-from app.reranking import rerank_codes as rerank_cpt_codes
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +76,7 @@ async def detect_database_capability():
                 # Alternative syntax: vectors.dense + sparse_vectors.sparse
                 if "dense" in vectors_config and "sparse" in sparse_vectors_config:
                     _detected_capability = "hybrid_alt"
-                    console_logger.info("Hybrid Search ENABLED (✨ Dense + Sparse vectors with RRF fusion)")
+                    console_logger.info("Hybrid Search ENABLED ( Dense + Sparse vectors with RRF fusion)")
                 else:
                     _detected_capability = "named_dense" 
                     console_logger.info("Dense-only search (consider upgrading to hybrid)")
@@ -98,7 +85,7 @@ async def detect_database_capability():
                 # Check for named vectors format
                 if "dense" in vectors_config and "sparse" in vectors_config:
                     _detected_capability = "hybrid"
-                    console_logger.info("Hybrid Search ENABLED (✨ Dense + Sparse vectors with RRF fusion)")
+                    console_logger.info("Hybrid Search ENABLED ( Dense + Sparse vectors with RRF fusion)")
                 elif "dense" in vectors_config:
                     _detected_capability = "named_dense"
                     console_logger.info("Dense-only search (consider upgrading to hybrid)")
@@ -244,7 +231,7 @@ async def _search_vectors_debug(
     async with httpx.AsyncClient(timeout=30) as client:
         # 1. Dense-only search
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(f"🔵 DENSE (SEMANTIC) SEARCH RESULTS (top {DENSE_SEARCH_LIMIT}):")
+        console_logger.info(f" DENSE (SEMANTIC) SEARCH RESULTS (top {DENSE_SEARCH_LIMIT}):")
         console_logger.info(f"{'='*60}")
         
         dense_payload = {
@@ -262,11 +249,14 @@ async def _search_vectors_debug(
         results["dense"] = dense_results
         
         for i, hit in enumerate(dense_results, 1):
-            console_logger.info(f"  {i:2d}. [{hit['payload']['code']}] {hit['payload']['description'][:50]} (score: {hit['score']:.4f})")
+            console_logger.info(
+                f"  {i:2d}. [{hit['payload']['code']}] {hit['payload']['description'][:50]} "
+                f"(score: {hit['score']:.4f})"
+            )
         
         # 2. Sparse-only search
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(f"🟡 SPARSE (KEYWORD/BM25) SEARCH RESULTS (top {SPARSE_SEARCH_LIMIT}):")
+        console_logger.info(f" SPARSE (KEYWORD/BM25) SEARCH RESULTS (top {SPARSE_SEARCH_LIMIT}):")
         console_logger.info(f"{'='*60}")
         
         sparse_payload = {
@@ -284,11 +274,14 @@ async def _search_vectors_debug(
         results["sparse"] = sparse_results
         
         for i, hit in enumerate(sparse_results, 1):
-            console_logger.info(f"  {i:2d}. [{hit['payload']['code']}] {hit['payload']['description'][:50]} (score: {hit['score']:.4f})")
+            console_logger.info(
+                f"  {i:2d}. [{hit['payload']['code']}] {hit['payload']['description'][:50]} "
+                f"(score: {hit['score']:.4f})"
+            )
         
         # 3. Hybrid search with RRF
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(f"🟢 HYBRID (RRF FUSION) SEARCH RESULTS (top {HYBRID_RESULT_LIMIT}):")
+        console_logger.info(f" HYBRID (RRF FUSION) SEARCH RESULTS (top {HYBRID_RESULT_LIMIT}):")
         console_logger.info(f"{'='*60}")
         
         hybrid_payload = {
@@ -319,7 +312,10 @@ async def _search_vectors_debug(
         results["hybrid"] = hybrid_results
         
         for i, hit in enumerate(hybrid_results[:30], 1):
-            console_logger.info(f"  {i:2d}. [{hit['payload']['code']}] {hit['payload']['description'][:50]} (score: {hit['score']:.4f})")
+            console_logger.info(
+                f"  {i:2d}. [{hit['payload']['code']}] {hit['payload']['description'][:50]} "
+                f"(score: {hit['score']:.4f})"
+            )
         
         if len(hybrid_results) > 30:
             console_logger.info(f"  ... and {len(hybrid_results) - 30} more results")
@@ -344,7 +340,7 @@ async def adaptive_search_single_entity(
             sparse_vectors = await get_sparse_embeddings_batch([entity])
             
             if debug:
-                console_logger.info(f"\n📊 Searching for entity: '{entity}'")
+                console_logger.info(f"\n Searching for entity: '{entity}'")
                 debug_results = await _search_vectors_debug(
                     dense_vector=dense_vectors[0],
                     sparse_vector=sparse_vectors[0],
@@ -516,7 +512,10 @@ async def adaptive_retrieve_cpt_candidates(
     tracker.end_module("reranking.py")
 
     if reranked:
-        console_logger.info(f"✅ Found {len(reranked)} CPT code(s) | Top result: {reranked[0]['code']} ({reranked[0]['confidence']}%)")
+        console_logger.info(
+            f" Found {len(reranked)} CPT code(s) | Top result: "
+            f"{reranked[0]['code']} ({reranked[0]['confidence']}%)"
+        )
     else:
         console_logger.error("LLM re-ranking returned no results")
         

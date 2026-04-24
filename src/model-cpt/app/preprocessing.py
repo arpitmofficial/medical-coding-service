@@ -23,11 +23,12 @@ MODEL_ICD10_DIR = MODEL_CPT_DIR.parent / "model-icd-10"
 _original_path = sys.path.copy()
 sys.path.insert(0, str(MODEL_ICD10_DIR))
 
-from app.config import LLM_API_KEY, LLM_MODEL, console_logger
-from app.execution_analysis import tracker
-
-# Restore original path
-sys.path = _original_path
+try:
+    from app.config import LLM_API_KEY, LLM_MODEL, console_logger
+    from app.execution_analysis import tracker
+finally:
+    # Always restore original import path state
+    sys.path = _original_path
 
 logger = logging.getLogger(__name__)
 
@@ -36,30 +37,33 @@ _is_gemini = LLM_MODEL.startswith("gemini")
 
 if _is_gemini:
     from google import genai
+
     _gemini_client = genai.Client(api_key=LLM_API_KEY)
 else:
     from openai import AsyncOpenAI
+
     _client = AsyncOpenAI(api_key=LLM_API_KEY)
 
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
 
+
 def _clean_json_response(content: str) -> str:
     """Remove markdown code fences and extra whitespace from LLM JSON responses."""
     content = content.strip()
-    
+
     # Remove markdown code fences (```json ... ``` or ``` ... ```)
     if content.startswith("```"):
         # Find the end of the opening fence (could be ```json or just ```)
         first_newline = content.find("\n")
         if first_newline != -1:
-            content = content[first_newline + 1:]
-        
+            content = content[first_newline + 1 :]
+
         # Remove closing fence
         if content.endswith("```"):
             content = content[:-3]
-    
+
     return content.strip()
 
 
@@ -87,13 +91,14 @@ _PARSE_SYSTEM = (
     "   - 'X-ray' → 'radiograph' (with body part if mentioned)\n"
     "5. Do NOT extract diagnoses or conditions - ONLY procedures, tests, and services.\n"
     "Return ONLY a valid JSON array of descriptive procedural strings. Do not include markdown fences or extra text.\n"
-    "Example output: [\"appendectomy\", \"CT scan of abdomen\", \"laparoscopic cholecystectomy\"]"
+    'Example output: ["appendectomy", "CT scan of abdomen", "laparoscopic cholecystectomy"]'
 )
 
 
 # ---------------------------------------------------------------------------
 # Public async function
 # ---------------------------------------------------------------------------
+
 
 async def parse_entities(raw_text: str) -> list[str]:
     """
@@ -127,9 +132,9 @@ async def parse_entities(raw_text: str) -> list[str]:
             content = response.text.strip()
             if hasattr(response, "usage_metadata") and response.usage_metadata:
                 um = response.usage_metadata
-                input_tokens  = getattr(um, "prompt_token_count", None)
+                input_tokens = getattr(um, "prompt_token_count", None)
                 output_tokens = getattr(um, "candidates_token_count", None)
-                total_tokens  = getattr(um, "total_token_count", None)
+                total_tokens = getattr(um, "total_token_count", None)
         else:
             response = await asyncio.wait_for(
                 _client.chat.completions.create(
@@ -144,9 +149,9 @@ async def parse_entities(raw_text: str) -> list[str]:
             )
             content = response.choices[0].message.content.strip()
             if response.usage:
-                input_tokens  = response.usage.prompt_tokens
+                input_tokens = response.usage.prompt_tokens
                 output_tokens = response.usage.completion_tokens
-                total_tokens  = response.usage.total_tokens
+                total_tokens = response.usage.total_tokens
 
     except asyncio.TimeoutError:
         error_msg = "LLM API timeout (> 20 s)"
@@ -155,16 +160,27 @@ async def parse_entities(raw_text: str) -> list[str]:
     except Exception as e:
         err_type = type(e).__name__
         status_code = getattr(e, "status_code", None) or getattr(e, "code", None)
-        if status_code == 429 or "RateLimit" in err_type or "ResourceExhausted" in err_type or "quota" in str(e).lower():
+        if (
+            status_code == 429
+            or "RateLimit" in err_type
+            or "ResourceExhausted" in err_type
+            or "quota" in str(e).lower()
+        ):
             error_msg = f"LLM rate-limited / high traffic ({err_type})"
         else:
             error_msg = f"{err_type}: {e}"
-        logger.error("parse_entities | LLM error — %s; falling back to raw text", error_msg)
+        logger.error(
+            "parse_entities | LLM error — %s; falling back to raw text", error_msg
+        )
 
     api_elapsed = time.perf_counter() - t0
     tracker.record_api_call(
-        "preprocessing.py", "LLM (parse_entities)", api_elapsed,
-        input_tokens, output_tokens, total_tokens,
+        "preprocessing.py",
+        "LLM (parse_entities)",
+        api_elapsed,
+        input_tokens,
+        output_tokens,
+        total_tokens,
         error=error_msg,
     )
 
@@ -173,7 +189,7 @@ async def parse_entities(raw_text: str) -> list[str]:
         return [raw_text]
 
     logger.debug("parse_entities | raw LLM response: %s", content)
-    
+
     # Clean markdown fences from response
     content = _clean_json_response(content)
 
@@ -185,7 +201,7 @@ async def parse_entities(raw_text: str) -> list[str]:
         logger.warning(
             "parse_entities | JSON parse failed (%s); content='%s'; falling back to raw text",
             exc,
-            content[:200]  # Log first 200 chars
+            content[:200],  # Log first 200 chars
         )
         # Graceful degradation: treat the whole text as one entity
         entities = [raw_text]
@@ -200,8 +216,8 @@ async def parse_entities(raw_text: str) -> list[str]:
             unique.append(e.strip())
 
     logger.debug("parse_entities | extracted %d entities: %s", len(unique), unique)
-    
+
     # Show extracted entities in console
-    console_logger.info(f"🧠 LLM Entity Extraction (CPT): {unique}")
-    
+    console_logger.info(f" LLM Entity Extraction (CPT): {unique}")
+
     return unique
