@@ -8,10 +8,8 @@ interface for doctors to submit clinical diagnoses.
 
 Endpoints
 ---------
-POST /predict          — Run all active models and return combined results.
+POST /predict          — Run all registered models and return combined results.
 POST /predict/icd10    — Run only the ICD-10 pipeline.
-POST /predict/cpt      — (future) Run only the CPT pipeline.
-POST /predict/loinc    — (future) Run only the LOINC pipeline.
 GET  /health           — Liveness / readiness check.
 
 Authentication

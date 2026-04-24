@@ -24,7 +24,9 @@ The Medical Coding Service is a shared gateway that:
 
 **Current Features:**
 - ✅ ICD-10 medical code retrieval
-- 🔄 CPT and LOINC endpoints (future implementation)
+- ✅ CPT medical code retrieval
+- ✅ LOINC lab/observation code retrieval
+- ✅ Shared FastAPI gateway with Swagger UI docs
 
 ---
 
@@ -204,7 +206,7 @@ Provides detailed API documentation in a different format.
 ```json
 {
   "status": "ok",
-  "models": ["icd10"]
+  "models": ["icd10", "cpt", "loinc"]
 }
 ```
 
