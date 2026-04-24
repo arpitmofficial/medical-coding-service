@@ -94,7 +94,7 @@ async def retrieve_icd_candidates(
         len(search_queries),
     )
 
-    # Embed in a single batched call (one round-trip to Jina)
+    # Embed in a single batched call (one round-trip to SapBERT)
     logger.info("Embedding %d search queries …", len(search_queries))
     tracker.start_module("embedding.py")
     try:

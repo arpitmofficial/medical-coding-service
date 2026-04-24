@@ -23,7 +23,7 @@ async def search_vectors(
     """Query Qdrant using hybrid search (dense + sparse vectors) with RRF fusion.
 
     Args:
-        dense_vector: Dense embedding vector from Jina (768 dimensions).
+        dense_vector: Dense embedding vector from SapBERT (768 dimensions).
         sparse_vector: Sparse vector dict with 'indices' and 'values' keys.
         limit: Maximum number of results to return (default: QDRANT_TOP_K).
         score_threshold: Optional minimum similarity score filter applied to
@@ -63,15 +63,16 @@ async def search_vectors(
     # Main query payload with RRF fusion
     payload: Dict[str, Any] = {
         "prefetch": prefetch_configs,
-        "query": {"fusion": "rrf"},  # Reciprocal Rank Fusion
+        "query": {
+            "fusion": "rrf"  # Reciprocal Rank Fusion
+        },
         "limit": limit,
         "with_payload": True,
     }
 
     logger.debug(
         "search_vectors | hybrid search: limit=%d, score_threshold=%s, fusion=rrf",
-        limit,
-        score_threshold,
+        limit, score_threshold
     )
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -117,9 +118,7 @@ async def search_vectors_dense_only(
     Note: This function is deprecated. Use search_vectors() with both
     dense and sparse vectors for better results.
     """
-    logger.warning(
-        "Using deprecated dense-only search. Consider upgrading to hybrid search."
-    )
+    logger.warning("Using deprecated dense-only search. Consider upgrading to hybrid search.")
 
     payload: dict[str, Any] = {
         "vector": vector,
@@ -142,28 +141,21 @@ async def search_vectors_dense_only(
             response.raise_for_status()
     except httpx.TimeoutException:
         api_elapsed = time.perf_counter() - t0
-        tracker.record_api_call(
-            "qdrant_rest.py", "Qdrant Search API", api_elapsed, error="Timeout (> 20 s)"
-        )
+        tracker.record_api_call("qdrant_rest.py", "Qdrant Search API", api_elapsed,
+                                 error="Timeout (> 20 s)")
         logger.error("search_vectors | Qdrant API timeout (> 20 s)")
         raise RuntimeError("Qdrant search API timed out after 20 seconds") from None
     except httpx.ConnectError as e:
         api_elapsed = time.perf_counter() - t0
-        tracker.record_api_call(
-            "qdrant_rest.py",
-            "Qdrant Search API",
-            api_elapsed,
-            error=f"Connection error: {e}",
-        )
+        tracker.record_api_call("qdrant_rest.py", "Qdrant Search API", api_elapsed,
+                                 error=f"Connection error: {e}")
         logger.error("search_vectors | Qdrant API connection error: %s", e)
         raise RuntimeError(f"Qdrant connection failed: {e}") from e
     except httpx.HTTPStatusError as e:
         api_elapsed = time.perf_counter() - t0
         sc = e.response.status_code
         msg = "Qdrant rate-limited (429)" if sc == 429 else f"Qdrant HTTP {sc} error"
-        tracker.record_api_call(
-            "qdrant_rest.py", "Qdrant Search API", api_elapsed, error=msg
-        )
+        tracker.record_api_call("qdrant_rest.py", "Qdrant Search API", api_elapsed, error=msg)
         logger.error("search_vectors | %s", msg)
         raise RuntimeError(msg) from e
     api_elapsed = time.perf_counter() - t0
@@ -185,7 +177,10 @@ async def search_vectors_named_dense_only(
     logger.info("Using named dense vector search")
 
     payload: Dict[str, Any] = {
-        "vector": {"name": "dense", "vector": vector},
+        "vector": {
+            "name": "dense",
+            "vector": vector
+        },
         "limit": limit,
         "with_payload": True,
     }
@@ -223,25 +218,27 @@ async def search_vectors_debug(
     """
     from app.config import console_logger
 
-    results = {"dense": [], "sparse": [], "hybrid": []}
+    results = {
+        "dense": [],
+        "sparse": [],
+        "hybrid": []
+    }
 
     async with httpx.AsyncClient(timeout=30) as client:
         # 1. Dense-only search (top 30)
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(
-            f" DENSE (SEMANTIC) SEARCH RESULTS (top {DENSE_SEARCH_LIMIT}):"
-        )
+        console_logger.info(f" DENSE (SEMANTIC) SEARCH RESULTS (top {DENSE_SEARCH_LIMIT}):")
         console_logger.info(f"{'='*60}")
 
         dense_payload = {
             "vector": {"name": "dense", "vector": dense_vector},
             "limit": DENSE_SEARCH_LIMIT,
-            "with_payload": True,
+            "with_payload": True
         }
         response = await client.post(
             f"{QDRANT_URL}/collections/{COLLECTION}/points/search",
             headers=QDRANT_HEADERS,
-            json=dense_payload,
+            json=dense_payload
         )
         response.raise_for_status()
         dense_results = response.json()["result"]
@@ -255,20 +252,18 @@ async def search_vectors_debug(
 
         # 2. Sparse-only search (top 20)
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(
-            f" SPARSE (KEYWORD/BM25) SEARCH RESULTS (top {SPARSE_SEARCH_LIMIT}):"
-        )
+        console_logger.info(f" SPARSE (KEYWORD/BM25) SEARCH RESULTS (top {SPARSE_SEARCH_LIMIT}):")
         console_logger.info(f"{'='*60}")
 
         sparse_payload = {
             "vector": {"name": "sparse", "vector": sparse_vector},
             "limit": SPARSE_SEARCH_LIMIT,
-            "with_payload": True,
+            "with_payload": True
         }
         response = await client.post(
             f"{QDRANT_URL}/collections/{COLLECTION}/points/search",
             headers=QDRANT_HEADERS,
-            json=sparse_payload,
+            json=sparse_payload
         )
         response.raise_for_status()
         sparse_results = response.json()["result"]
@@ -282,28 +277,22 @@ async def search_vectors_debug(
 
         # 3. Hybrid search with RRF (combines dense 30 + sparse 20 → top 50)
         console_logger.info(f"\n{'='*60}")
-        console_logger.info(
-            f" HYBRID (RRF FUSION) SEARCH RESULTS (top {HYBRID_RESULT_LIMIT}):"
-        )
+        console_logger.info(f" HYBRID (RRF FUSION) SEARCH RESULTS (top {HYBRID_RESULT_LIMIT}):")
         console_logger.info(f"{'='*60}")
 
         hybrid_payload = {
             "prefetch": [
                 {"query": dense_vector, "using": "dense", "limit": DENSE_SEARCH_LIMIT},
-                {
-                    "query": sparse_vector,
-                    "using": "sparse",
-                    "limit": SPARSE_SEARCH_LIMIT,
-                },
+                {"query": sparse_vector, "using": "sparse", "limit": SPARSE_SEARCH_LIMIT}
             ],
             "query": {"fusion": "rrf"},
             "limit": HYBRID_RESULT_LIMIT,
-            "with_payload": True,
+            "with_payload": True
         }
         response = await client.post(
             f"{QDRANT_URL}/collections/{COLLECTION}/points/query",
             headers=QDRANT_HEADERS,
-            json=hybrid_payload,
+            json=hybrid_payload
         )
         response.raise_for_status()
         response_data = response.json()

@@ -30,7 +30,6 @@ Configured via src/.env:
 
 - QDRANT_URL
 - QDRANT_API_KEY
-- JINA_API_KEY
 - LLM_API_KEY
 - LLM_MODEL
 - QDRANT_TOP_K (optional)
@@ -77,4 +76,9 @@ This model is exposed through:
 
 See complete API docs at:
 
-- ../../api-documentation.md
+- [API Documentation](../../api-documentation.md)
+
+## Embedding Notes
+
+- Dense embeddings use local SapBERT.
+- Sparse embeddings use BM25-style FastEmbed retrieval.

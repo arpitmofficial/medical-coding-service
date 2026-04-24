@@ -28,12 +28,10 @@ Configured via src/.env:
 
 - QDRANT_URL
 - QDRANT_API_KEY
-- JINA_API_KEY
 - LLM_API_KEY
 - LLM_MODEL
 - QDRANT_TOP_K (optional)
 - FINAL_TOP_N (optional)
-- MIN_SCORE (optional)
 
 ## Run Local Query Test
 
@@ -71,6 +69,11 @@ This model is exposed through the API endpoints:
 See the root API docs here:
 
 - ../../api-documentation.md
+
+## Embedding Notes
+
+- Dense embeddings use local SapBERT.
+- Sparse embeddings use BM25-style FastEmbed retrieval.
    3. [I25.2] Old myocardial infarction (score: 0.4103)
    ... (30 more)
 

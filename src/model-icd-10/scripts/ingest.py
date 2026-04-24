@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 COLLECTION_NAME = "icd10_hybrid"
 # Path relative to this script's parent directory (model-icd-10/)
 EXCEL_FILE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "icd10cm_codes_2026.xlsx"
+    os.path.dirname(os.path.dirname(__file__)), "data", "icd10cm_codes_2026.xlsx"
 )
 
 

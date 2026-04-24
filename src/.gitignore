@@ -2,7 +2,6 @@
 
 # Environment and local secrets
 .env
-.env.*
 
 # Logs and runtime artifacts
 logs/

@@ -23,7 +23,7 @@ async def search_vectors(
     """Query Qdrant using hybrid search (dense + sparse vectors) with RRF fusion.
 
     Args:
-        dense_vector: Dense embedding vector from Jina (768 dimensions).
+        dense_vector: Dense embedding vector from SapBERT (768 dimensions).
         sparse_vector: Sparse vector dict with 'indices' and 'values' keys.
         limit: Maximum number of results to return (default: QDRANT_TOP_K).
         score_threshold: Optional minimum similarity score filter applied to 
